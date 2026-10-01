@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs (Vite frontend build, Go binary from Makefile)
+dist/
+fooddiary
+*.exe
+*.test
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Go build cache & coverage
+.cache-go/
+*.out
+
+# Frontend test coverage
+coverage/
+
+# Runtime data (docker-compose mounts ./data:/data)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDEs
+.idea/
+.vscode/
+
+# ZCode
+.zcode/
+
+# OS
+.DS_Store
+Thumbs.db
