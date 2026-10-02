@@ -1,0 +1,71 @@
+# FoodDiary 🍳
+
+移动端优先的「每日做饭成果」记录 PWA：记录每天做了什么菜，附成品照片、用料、步骤、耗时和评分，支持离线记录与数据导出。
+
+## 功能
+
+- 记录管理：菜名、分类、用料、步骤、耗时、难度、评分、标签、备注与成品照片（拍照/相册）
+- 回顾：今日首页、时间线浏览、按菜名/标签搜索
+- 统计：本月做饭天数、菜品数量、平均评分、连续天数、最常做分类
+- PWA：可安装到手机主屏，Service Worker 离线缓存，断网时保存本机、联网后同步
+- 导出：JSON（含记录）与 ZIP（含照片）一键下载
+
+## 技术栈
+
+| 端 | 技术 |
+|---|---|
+| 前端 | React + TypeScript + Vite + React Router，PWA（manifest + Service Worker） |
+| 后端 | Go + chi + SQLite（WAL），golang-migrate 迁移，本地文件存储媒体 |
+| 部署 | 多阶段 Docker 构建，Go 单体托管 API、前端静态资源和媒体文件 |
+| CI | GitHub Actions：构建、测试与空数据卷启动验证、远程部署脚本 |
+
+## 快速开始
+
+本地开发（同时启动 Go API `:8080` 和 Vite dev server）：
+
+```bash
+make dev
+```
+
+生产运行（Docker，访问 http://localhost:8080，数据持久化在 `./data`）：
+
+```bash
+docker compose up -d --build
+```
+
+## 常用命令
+
+```bash
+make dev      # 前后端同时开发
+make build    # 构建前端 + Go 二进制
+make check    # go test/vet + 前端类型检查与构建
+npm run test  # 前端单元测试
+```
+
+## 目录结构
+
+```text
+frontend/            # React PWA（Vite）
+backend/
+├── cmd/server/      # Go 服务入口与路由
+├── internal/        # 内部包
+└── migrations/      # SQLite 迁移
+docs/DEVELOPMENT.md  # 详细开发文档（产品范围、API 契约、数据模型、路线图）
+scripts/ci/          # CI 辅助脚本（启动验证、远程部署）
+```
+
+## 配置
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `FOODDIARY_ADDR` | `:8080` | 监听地址 |
+| `FOODDIARY_DATA_DIR` | `/data` | SQLite 与媒体根目录 |
+| `FOODDIARY_FRONTEND_DIR` | `frontend/dist` | SPA 构建产物目录 |
+| `FOODDIARY_MAX_UPLOAD_BYTES` | `20971520` | 单张图片上限（20 MiB） |
+| `FOODDIARY_MEDIA_RETENTION_DAYS` | `30` | 已删除媒体保留天数 |
+
+> 生产环境需启用 HTTPS（反向代理），否则相机调用、PWA 安装等能力会受浏览器安全策略限制。
+
+## API 概览
+
+统一前缀 `/api/v1`：`entries` 增删改查与复制、`entries/{id}/media` 照片上传、`stats` 统计、`tags` 标签、`sync` 离线同步、`export` 导出；健康检查位于 `/health/live` 与 `/health/ready`。完整契约见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
