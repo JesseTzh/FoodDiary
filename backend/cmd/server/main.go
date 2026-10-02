@@ -42,6 +42,8 @@ type Entry struct {
 	UpdatedAt   string           `json:"updated_at"`
 	Version     int              `json:"version"`
 	Media       []Media          `json:"media,omitempty"`
+	// 游客浏览：true 表示该记录开放给未登录的游客查看
+	SharedWithGuests bool `json:"shared_with_guests"`
 }
 type Media struct {
 	ID      string `json:"id"`
@@ -214,6 +216,15 @@ func (a *App) sessionValid(token string) (lastSeen time.Time, ok bool) {
 	return lastSeen, true
 }
 
+func (a *App) authed(r *http.Request) bool {
+	c, e := r.Cookie(sessionCookieName)
+	if e != nil || c.Value == "" {
+		return false
+	}
+	_, ok := a.sessionValid(c.Value)
+	return ok
+}
+
 // 滑动过期：只要一个月内有访问就自动续期，一个月完全不访问会话才失效。
 func (a *App) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -239,13 +250,10 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 }
 
 func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
-	authed := false
-	if c, e := r.Cookie(sessionCookieName); e == nil && c.Value != "" {
-		if _, ok := a.sessionValid(c.Value); ok {
-			authed = true
-		}
-	}
-	writeJSON(w, 200, map[string]any{"auth_required": a.passwordHash() != "", "authenticated": authed})
+	authed := a.authed(r)
+	var guestCount int
+	a.db.QueryRow("SELECT COUNT(*) FROM diary_entries WHERE deleted_at IS NULL AND shared_with_guests=1").Scan(&guestCount)
+	writeJSON(w, 200, map[string]any{"auth_required": a.passwordHash() != "", "authenticated": authed, "guest_shared_count": guestCount})
 }
 
 func (a *App) authSetup(w http.ResponseWriter, r *http.Request) {
@@ -344,7 +352,7 @@ func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "rating = ?")
 		args = append(args, x)
 	}
-	rows, e := a.db.Query("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version FROM diary_entries WHERE "+strings.Join(where, " AND ")+" ORDER BY cooked_on DESC,created_at DESC", args...)
+	rows, e := a.db.Query("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests FROM diary_entries WHERE "+strings.Join(where, " AND ")+" ORDER BY cooked_on DESC,created_at DESC", args...)
 	if e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
@@ -354,9 +362,11 @@ func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x Entry
 		var ij, sj string
-		if e := rows.Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version); e != nil {
+		var shared int
+		if e := rows.Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared); e != nil {
 			continue
 		}
+		x.SharedWithGuests = shared == 1
 		json.Unmarshal([]byte(ij), &x.Ingredients)
 		json.Unmarshal([]byte(sj), &x.Steps)
 		x.Tags = a.tags(x.ID)
@@ -404,10 +414,76 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) {
 	var x Entry
 	id := chi.URLParam(r, "id")
 	var ij, sj string
-	if e := a.db.QueryRow("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version FROM diary_entries WHERE id=? AND deleted_at IS NULL", id).Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version); e != nil {
+	var shared int
+	if e := a.db.QueryRow("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests FROM diary_entries WHERE id=? AND deleted_at IS NULL", id).Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared); e != nil {
 		errJSON(w, 404, "NOT_FOUND", "entry not found")
 		return
 	}
+	x.SharedWithGuests = shared == 1
+	json.Unmarshal([]byte(ij), &x.Ingredients)
+	json.Unmarshal([]byte(sj), &x.Steps)
+	x.Tags = a.tags(id)
+	x.Media = a.media(id)
+	writeJSON(w, 200, x)
+}
+
+// 切换某条记录对游客的开放状态（仅登录用户）。
+func (a *App) guestShare(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if decode(r, &body) != nil {
+		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
+		return
+	}
+	res, e := a.db.Exec("UPDATE diary_entries SET shared_with_guests=? WHERE id=? AND deleted_at IS NULL", map[bool]int{true: 1, false: 0}[body.Enabled], id)
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		errJSON(w, 404, "NOT_FOUND", "entry not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "shared_with_guests": body.Enabled})
+}
+
+// 游客（未登录）可见的记录列表：只返回开放且未删除的记录。
+func (a *App) guestEntries(w http.ResponseWriter, r *http.Request) {
+	rows, e := a.db.Query("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version FROM diary_entries WHERE deleted_at IS NULL AND shared_with_guests=1 ORDER BY cooked_on DESC,created_at DESC")
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	defer rows.Close()
+	out := []Entry{}
+	for rows.Next() {
+		var x Entry
+		var ij, sj string
+		if e := rows.Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version); e != nil {
+			continue
+		}
+		x.SharedWithGuests = true
+		json.Unmarshal([]byte(ij), &x.Ingredients)
+		json.Unmarshal([]byte(sj), &x.Steps)
+		x.Tags = a.tags(x.ID)
+		x.Media = a.media(x.ID)
+		out = append(out, x)
+	}
+	writeJSON(w, 200, map[string]any{"items": out, "total": len(out)})
+}
+
+// 游客查看单条开放记录；未开放的记录一律 404，不暴露存在性。
+func (a *App) guestGet(w http.ResponseWriter, r *http.Request) {
+	var x Entry
+	id := chi.URLParam(r, "id")
+	var ij, sj string
+	if e := a.db.QueryRow("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version FROM diary_entries WHERE id=? AND deleted_at IS NULL AND shared_with_guests=1", id).Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version); e != nil {
+		errJSON(w, 404, "NOT_FOUND", "entry not found")
+		return
+	}
+	x.SharedWithGuests = true
 	json.Unmarshal([]byte(ij), &x.Ingredients)
 	json.Unmarshal([]byte(sj), &x.Steps)
 	x.Tags = a.tags(id)
@@ -604,9 +680,22 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, Media{ID: mid, EntryID: entry, Mime: mime, Size: n, URL: "/media/assets/" + mid + "/original"})
 }
+// 已开放给游客的记录，其照片允许未登录访问；其余仍要求有效会话。
 func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !a.mediaShared(id) && !a.authed(r) {
+		errJSON(w, 401, "UNAUTHORIZED", "authentication required")
+		return
+	}
 	http.ServeFile(w, r, filepath.Join(a.data, "media", id))
+}
+
+func (a *App) mediaShared(mediaID string) bool {
+	var shared int
+	if a.db.QueryRow("SELECT e.shared_with_guests FROM media_assets m JOIN diary_entries e ON e.id=m.entry_id WHERE m.id=? AND e.deleted_at IS NULL", mediaID).Scan(&shared) != nil {
+		return false
+	}
+	return shared == 1
 }
 func (a *App) syncPush(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -671,18 +760,34 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	f.Write(data)
 	z.Close()
 }
+// 按文件名顺序执行未应用过的迁移；已应用的记录在 schema_migrations 中，避免重放
+// （如 ALTER TABLE 这类非幂等语句）。
 func loadMigrations(db *sql.DB, dir string) error {
+	if _, e := db.Exec("CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"); e != nil {
+		return e
+	}
 	files, e := filepath.Glob(filepath.Join(dir, "*.up.sql"))
 	if e != nil || len(files) == 0 {
 		return fmt.Errorf("no migration files found in %s", dir)
 	}
 	sort.Strings(files)
 	for _, f := range files {
+		version := filepath.Base(f)
+		var applied int
+		if e := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version=?", version).Scan(&applied); e != nil {
+			return e
+		}
+		if applied > 0 {
+			continue
+		}
 		sqlBytes, e := os.ReadFile(f)
 		if e != nil {
 			return e
 		}
 		if _, e := db.Exec(string(sqlBytes)); e != nil {
+			return fmt.Errorf("%s: %w", f, e)
+		}
+		if _, e := db.Exec("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)", version, now()); e != nil {
 			return fmt.Errorf("%s: %w", f, e)
 		}
 	}
@@ -707,6 +812,9 @@ func routes(a *App) http.Handler {
 		r.Post("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 			a.requireAuth(http.HandlerFunc(a.authLogout)).ServeHTTP(w, r)
 		})
+		// 游客浏览：公开只读接口，仅暴露标记为开放的记录
+		r.Get("/guest/entries", a.guestEntries)
+		r.Get("/guest/entries/{id}", a.guestGet)
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAuth)
 			r.Get("/entries", a.entries)
@@ -716,6 +824,7 @@ func routes(a *App) http.Handler {
 			r.Delete("/entries/{id}", a.delete)
 			r.Post("/entries/{id}/copy", a.copy)
 			r.Post("/entries/{id}/media", a.upload)
+			r.Post("/entries/{id}/guest-share", a.guestShare)
 			r.Get("/stats", a.stats)
 			r.Get("/sync", a.syncPull)
 			r.Post("/sync/push", a.syncPush)
@@ -733,7 +842,7 @@ func routes(a *App) http.Handler {
 			})
 		})
 	})
-	r.With(a.requireAuth).Get("/media/assets/{id}/{variant}", a.mediaFile)
+	r.Get("/media/assets/{id}/{variant}", a.mediaFile)
 	frontend := os.Getenv("FOODDIARY_FRONTEND_DIR")
 	if frontend == "" {
 		frontend = "frontend/dist"

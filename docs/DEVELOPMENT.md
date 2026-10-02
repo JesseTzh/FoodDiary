@@ -137,6 +137,7 @@ FoodDiary/
 | `created_at`/`updated_at` | TEXT | UTC RFC3339 |
 | `deleted_at` | TEXT | 软删除时间，可空 |
 | `version` | INTEGER | 乐观并发版本 |
+| `shared_with_guests` | INTEGER | 0/1，是否开放给游客浏览（迁移 000003） |
 
 `entry_tags`：`entry_id`、`tag` 联合主键。  
 `media_assets`：`id`、`entry_id`、`original_name`、`mime`、`size_bytes`、`width`、`height`、`sha256`、`status`、`created_at`。  
@@ -170,7 +171,7 @@ Dexie 数据库 `fooddiary` 包含：
 |---|---|---|
 | GET | `/health/live` | 进程存活 |
 | GET | `/health/ready` | SQLite 可用 |
-| GET | `/api/v1/auth/status` | 登录状态（是否已设密码、当前会话是否有效） |
+| GET | `/api/v1/auth/status` | 登录状态（是否已设密码、当前会话是否有效、游客开放记录数） |
 | POST | `/api/v1/auth/setup` | 首次设置访问密码（仅未设置时可用，重复调用返回 409） |
 | POST | `/api/v1/auth/login` | 密码登录，签发会话 Cookie（失败限速：10 次失败锁 15 分钟） |
 | POST | `/api/v1/auth/logout` | 退出登录，销毁会话 |
@@ -180,15 +181,20 @@ Dexie 数据库 `fooddiary` 包含：
 | PATCH | `/api/v1/entries/{id}` | 更新记录，带 `version`（需登录） |
 | DELETE | `/api/v1/entries/{id}` | 软删除（需登录） |
 | POST | `/api/v1/entries/{id}/copy` | 复制为新记录（需登录） |
+| POST | `/api/v1/entries/{id}/guest-share` | 开放/取消开放给游客，body `{"enabled":bool}`（需登录） |
 | POST | `/api/v1/entries/{id}/media` | multipart 上传照片（需登录） |
-| GET | `/media/assets/{id}/{variant}` | `thumbnail`/`preview`/`original`（需登录） |
+| GET | `/media/assets/{id}/{variant}` | `thumbnail`/`preview`/`original`；开放记录的照片免登录，其余需登录 |
+| GET | `/api/v1/guest/entries` | 游客浏览：仅返回开放且未删除的记录（免登录，只读） |
+| GET | `/api/v1/guest/entries/{id}` | 游客浏览单条开放记录；未开放一律 404，不暴露存在性 |
 | GET | `/api/v1/stats?from=&to=` | 统计数据（需登录） |
 | GET | `/api/v1/tags` | 标签建议（需登录） |
 | GET | `/api/v1/sync?cursor=` | 拉取服务端变更（需登录） |
 | POST | `/api/v1/sync/push` | 批量提交离线变更（需登录） |
 | GET | `/api/v1/export?format=json\|zip` | 导出数据（需登录） |
 
-登录与会话：单密码模式，密码以 PBKDF2-SHA256（600k 次迭代、随机盐）哈希后存于 `app_settings`；除 `/health/*`、`/api/v1/auth/status`、`auth/setup`、`auth/login` 与前端静态资源外全部需要会话。会话为 32 字节随机 token 的 HttpOnly Cookie（SameSite=Lax），仅存 SHA-256 于 `sessions` 表；**滑动过期**：每次访问自动把有效期续到 30 天后（Cookie 同步续期），连续 30 天不访问才失效。`FOODDIARY_PASSWORD` 环境变量可在启动时初始化或重置密码。
+登录与会话：单密码模式，密码以 PBKDF2-SHA256（600k 次迭代、随机盐）哈希后存于 `app_settings`；除 `/health/*`、`/api/v1/auth/status`、`auth/setup`、`auth/login`、`/api/v1/guest/*`、开放记录的照片与前端静态资源外全部需要会话。会话为 32 字节随机 token 的 HttpOnly Cookie（SameSite=Lax），仅存 SHA-256 于 `sessions` 表；**滑动过期**：每次访问自动把有效期续到 30 天后（Cookie 同步续期），连续 30 天不访问才失效。`FOODDIARY_PASSWORD` 环境变量可在启动时初始化或重置密码。
+
+游客浏览：在 `diary_entries.shared_with_guests` 上标记（设置页「游客浏览」卡片或详情页按钮切换，复制出的新记录默认不开放）。游客接口为只读，仅暴露开放且未删除的记录及其照片；`/api/v1/auth/status` 返回 `guest_shared_count`，登录页据此显示「游客浏览」入口，前端提供 `/guest`（列表）与 `/guest/:id`（详情）两个免登录路由。
 
 创建记录示例：
 
@@ -220,6 +226,8 @@ Dexie 数据库 `fooddiary` 包含：
 - `/diary/:id/edit` 编辑。
 - `/stats` 统计。
 - `/settings` 设置、导出和同步状态。
+- `/guest` 游客浏览（免登录）：开放的记录列表。
+- `/guest/:id` 游客浏览（免登录）：单条开放记录详情，只读。
 
 底部导航固定为“今天、记录、统计、设置”；新增按钮使用悬浮主按钮。表单必须支持相机拍照和相册选择，图片先显示本地预览，再进入上传队列。保存按钮在离线时显示“保存到本机”，在线时显示“保存并同步”。
 

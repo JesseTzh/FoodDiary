@@ -6,6 +6,7 @@
 
 - 记录管理：菜名、分类、用料、步骤、耗时、难度、评分、标签、备注与成品照片（拍照/相册）
 - 登录保护：单密码访问，首次使用在页面设置密码；会话自动续期，一个月不活跃才需重新登录
+- 游客浏览：可把指定记录标记为「开放给游客」，未登录访客在登录页即可只读浏览这些记录（含照片），未开放记录对游客不可见
 - 回顾：今日首页、时间线浏览、按菜名/标签搜索
 - 统计：本月做饭天数、菜品数量、平均评分、连续天数、最常做分类
 - PWA：可安装到手机主屏，Service Worker 离线缓存，断网时保存本机、联网后同步
@@ -78,4 +79,4 @@ scripts/ci/          # CI 辅助脚本（启动验证、远程部署）
 
 ## API 概览
 
-统一前缀 `/api/v1`：`auth/status`、`auth/setup`、`auth/login`、`auth/logout` 登录保护（会话 Cookie，HttpOnly），其余接口均需登录；`entries` 增删改查与复制、`entries/{id}/media` 照片上传、`stats` 统计、`tags` 标签、`sync` 离线同步、`export` 导出；健康检查位于 `/health/live` 与 `/health/ready`。完整契约见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+统一前缀 `/api/v1`：`auth/status`、`auth/setup`、`auth/login`、`auth/logout` 登录保护（会话 Cookie，HttpOnly），其余接口均需登录；`entries` 增删改查与复制、`entries/{id}/guest-share` 开放/取消开放给游客、`entries/{id}/media` 照片上传、`stats` 统计、`tags` 标签、`sync` 离线同步、`export` 导出；游客免登录只读接口为 `guest/entries` 与 `guest/entries/{id}`（仅返回开放记录），开放记录的照片可直接访问，其余媒体仍需登录；健康检查位于 `/health/live` 与 `/health/ready`。完整契约见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。

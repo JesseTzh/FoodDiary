@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -199,5 +201,164 @@ func TestVerifyPassword(t *testing.T) {
 	}
 	if verifyPassword("garbage", "hunter2") {
 		t.Fatal("malformed hash accepted")
+	}
+}
+
+func dataOf(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	defer resp.Body.Close()
+	var j struct {
+		Data map[string]any `json:"data"`
+	}
+	if e := json.NewDecoder(resp.Body).Decode(&j); e != nil {
+		t.Fatal(e)
+	}
+	return j.Data
+}
+
+// 以已登录身份创建一条记录，返回记录 ID。
+func createEntry(t *testing.T, c *http.Client, base, title string) string {
+	t.Helper()
+	resp := postJSON(t, c, base+"/api/v1/entries", map[string]any{
+		"cooked_on": "2026-10-01", "title": title, "category": "home",
+		"ingredients": []any{}, "steps": []string{}, "tags": []string{},
+	})
+	if resp.StatusCode != 201 {
+		t.Fatalf("create entry %s: got %d", title, resp.StatusCode)
+	}
+	return dataOf(t, resp)["id"].(string)
+}
+
+func guestListIDs(t *testing.T, base string) []string {
+	t.Helper()
+	resp := get(t, newClient(), base+"/api/v1/guest/entries")
+	if resp.StatusCode != 200 {
+		t.Fatalf("guest entries: got %d, want 200", resp.StatusCode)
+	}
+	items := dataOf(t, resp)["items"].([]any)
+	ids := []string{}
+	for _, it := range items {
+		ids = append(ids, it.(map[string]any)["id"].(string))
+	}
+	return ids
+}
+
+func TestGuestShareFlow(t *testing.T) {
+	ts, _ := newTestServer(t)
+	owner := newClient()
+	postJSON(t, owner, ts.URL+"/api/v1/auth/setup", map[string]string{"password": "hunter2"})
+	idA := createEntry(t, owner, ts.URL, "番茄炒蛋")
+	idB := createEntry(t, owner, ts.URL, "青椒肉丝")
+
+	guest := newClient()
+	if ids := guestListIDs(t, ts.URL); len(ids) != 0 {
+		t.Fatalf("no entries should be shared initially, got %v", ids)
+	}
+	if got := statusOf(t, get(t, guest, ts.URL+"/api/v1/guest/entries/"+idA)); got != 404 {
+		t.Fatalf("unshared entry to guest: got %d, want 404", got)
+	}
+
+	// 游客不能自己开启分享
+	if got := statusOf(t, postJSON(t, guest, ts.URL+"/api/v1/entries/"+idA+"/guest-share", map[string]bool{"enabled": true})); got != 401 {
+		t.Fatalf("guest guest-share: got %d, want 401", got)
+	}
+
+	// 开放 idA 给游客
+	if got := statusOf(t, postJSON(t, owner, ts.URL+"/api/v1/entries/"+idA+"/guest-share", map[string]bool{"enabled": true})); got != 200 {
+		t.Fatalf("enable share: got %d", got)
+	}
+	if ids := guestListIDs(t, ts.URL); len(ids) != 1 || ids[0] != idA {
+		t.Fatalf("guest list should only contain %s, got %v", idA, ids)
+	}
+	if got := statusOf(t, get(t, guest, ts.URL+"/api/v1/guest/entries/"+idA)); got != 200 {
+		t.Fatalf("shared entry to guest: got %d, want 200", got)
+	}
+	if got := statusOf(t, get(t, guest, ts.URL+"/api/v1/guest/entries/"+idB)); got != 404 {
+		t.Fatalf("unshared entryB to guest: got %d, want 404", got)
+	}
+	if n := authStatusOf(t, guest, ts.URL)["guest_shared_count"].(float64); n != 1 {
+		t.Fatalf("guest_shared_count: got %v, want 1", n)
+	}
+
+	// 取消开放后游客立即不可见
+	if got := statusOf(t, postJSON(t, owner, ts.URL+"/api/v1/entries/"+idA+"/guest-share", map[string]bool{"enabled": false})); got != 200 {
+		t.Fatalf("disable share: got %d", got)
+	}
+	if got := statusOf(t, get(t, guest, ts.URL+"/api/v1/guest/entries/"+idA)); got != 404 {
+		t.Fatalf("unshared again: got %d, want 404", got)
+	}
+	if got := statusOf(t, postJSON(t, owner, ts.URL+"/api/v1/entries/missing/guest-share", map[string]bool{"enabled": true})); got != 404 {
+		t.Fatalf("share missing entry: got %d, want 404", got)
+	}
+}
+
+func uploadMedia(t *testing.T, c *http.Client, base, entryID, name string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, _ := w.CreateFormFile("file", name)
+	fw.Write([]byte("jpeg-bytes"))
+	w.Close()
+	resp, e := c.Post(base+"/api/v1/entries/"+entryID+"/media", w.FormDataContentType(), &buf)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if resp.StatusCode != 201 {
+		t.Fatalf("upload media: got %d", resp.StatusCode)
+	}
+	return dataOf(t, resp)["id"].(string)
+}
+
+func TestGuestMediaAccess(t *testing.T) {
+	ts, _ := newTestServer(t)
+	owner := newClient()
+	postJSON(t, owner, ts.URL+"/api/v1/auth/setup", map[string]string{"password": "hunter2"})
+	sharedID := createEntry(t, owner, ts.URL, "开放菜")
+	privateID := createEntry(t, owner, ts.URL, "私密菜")
+	sharedMedia := uploadMedia(t, owner, ts.URL, sharedID, "a.jpg")
+	privateMedia := uploadMedia(t, owner, ts.URL, privateID, "b.jpg")
+
+	guest := newClient()
+	if got := statusOf(t, get(t, guest, ts.URL+"/media/assets/"+sharedMedia+"/original")); got != 401 {
+		t.Fatalf("media of unshared entry: got %d, want 401", got)
+	}
+	postJSON(t, owner, ts.URL+"/api/v1/entries/"+sharedID+"/guest-share", map[string]bool{"enabled": true})
+	resp := get(t, guest, ts.URL+"/media/assets/"+sharedMedia+"/original")
+	if resp.StatusCode != 200 {
+		t.Fatalf("media of shared entry: got %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "jpeg-bytes" {
+		t.Fatalf("media content: got %q", body)
+	}
+	if got := statusOf(t, get(t, guest, ts.URL+"/media/assets/"+privateMedia+"/original")); got != 401 {
+		t.Fatalf("private media stays protected: got %d, want 401", got)
+	}
+	// 登录用户访问未开放记录的照片不受影响
+	if got := statusOf(t, get(t, owner, ts.URL+"/media/assets/"+privateMedia+"/original")); got != 200 {
+		t.Fatalf("owner media access: got %d, want 200", got)
+	}
+}
+
+func TestMigrationsIdempotent(t *testing.T) {
+	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	if e := loadMigrations(db, "../../migrations"); e != nil {
+		t.Fatalf("first run: %v", e)
+	}
+	if e := loadMigrations(db, "../../migrations"); e != nil {
+		t.Fatalf("second run must skip applied migrations: %v", e)
+	}
+	var n int
+	if e := db.QueryRow("SELECT COUNT(*) FROM diary_entries WHERE shared_with_guests=0").Scan(&n); e != nil {
+		t.Fatalf("shared_with_guests column missing: %v", e)
+	}
+	var applied int
+	if e := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&applied); e != nil || applied != 3 {
+		t.Fatalf("schema_migrations rows: got %d (%v), want 3", applied, e)
 	}
 }
