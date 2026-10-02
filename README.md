@@ -27,10 +27,17 @@
 make dev
 ```
 
-生产运行（Docker，访问 http://localhost:8080，数据持久化在 `./data`）：
+生产运行（Docker，访问 http://localhost:8080，数据持久化在 `./data`，拉取 `jessetzh/fooddiary` 镜像）：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
+```
+
+本地构建镜像并运行：
+
+```bash
+docker build -t jessetzh/fooddiary:latest .
+docker compose up -d
 ```
 
 ## 常用命令
