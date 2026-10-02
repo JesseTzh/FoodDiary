@@ -2,7 +2,10 @@ package main
 
 import (
 	"archive/zip"
+	"crypto/pbkdf2"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -12,11 +15,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,8 +51,10 @@ type Media struct {
 	URL     string `json:"url"`
 }
 type App struct {
-	db   *sql.DB
-	data string
+	db          *sql.DB
+	data        string
+	sessionDays int
+	limiter     *ipLimiter
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -64,6 +72,254 @@ func errJSON(w http.ResponseWriter, status int, code, msg string) {
 func decode(r *http.Request, v any) error {
 	return json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(v)
 }
+
+const (
+	sessionCookieName  = "fooddiary_session"
+	passwordSettingKey = "auth_password_hash"
+	pbkdf2Iterations   = 600000
+)
+
+func hashPassword(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, e := rand.Read(salt); e != nil {
+		return "", e
+	}
+	h, e := pbkdf2.Key(sha256.New, password, salt, pbkdf2Iterations, 32)
+	if e != nil {
+		return "", e
+	}
+	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", pbkdf2Iterations, hex.EncodeToString(salt), hex.EncodeToString(h)), nil
+}
+
+func verifyPassword(stored, password string) bool {
+	parts := strings.Split(stored, "$")
+	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
+		return false
+	}
+	iter, e := strconv.Atoi(parts[1])
+	if e != nil || iter < 1 {
+		return false
+	}
+	salt, e := hex.DecodeString(parts[2])
+	if e != nil {
+		return false
+	}
+	want, e := hex.DecodeString(parts[3])
+	if e != nil || len(want) == 0 {
+		return false
+	}
+	got, e := pbkdf2.Key(sha256.New, password, salt, iter, len(want))
+	if e != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+type ipLimiter struct {
+	mu    sync.Mutex
+	fails map[string]*attempt
+}
+type attempt struct {
+	count int
+	until time.Time
+}
+
+func newIPLimiter() *ipLimiter { return &ipLimiter{fails: map[string]*attempt{}} }
+
+func (l *ipLimiter) blocked(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.fails[ip]
+	return ok && a.count >= 10 && time.Now().Before(a.until)
+}
+func (l *ipLimiter) fail(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a := l.fails[ip]
+	if a == nil {
+		if len(l.fails) > 1000 {
+			l.fails = map[string]*attempt{}
+		}
+		a = &attempt{}
+		l.fails[ip] = a
+	}
+	a.count++
+	if a.count >= 10 {
+		a.until = time.Now().Add(15 * time.Minute)
+	}
+}
+func (l *ipLimiter) reset(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.fails, ip)
+}
+
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		return strings.TrimSpace(strings.Split(xf, ",")[0])
+	}
+	if host, _, e := net.SplitHostPort(r.RemoteAddr); e == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (a *App) passwordHash() string {
+	var h string
+	a.db.QueryRow("SELECT value FROM app_settings WHERE key=?", passwordSettingKey).Scan(&h)
+	return h
+}
+func (a *App) setPasswordHash(hash string) error {
+	_, e := a.db.Exec("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", passwordSettingKey, hash)
+	return e
+}
+
+func (a *App) sessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookieName, Value: token, Path: "/",
+		MaxAge: maxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+}
+
+func (a *App) newSession(w http.ResponseWriter, r *http.Request) error {
+	raw := make([]byte, 32)
+	if _, e := rand.Read(raw); e != nil {
+		return e
+	}
+	token := hex.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(token))
+	exp := time.Now().UTC().Add(time.Duration(a.sessionDays) * 24 * time.Hour).Format(time.RFC3339)
+	if _, e := a.db.Exec("INSERT INTO sessions(token_hash,created_at,last_seen_at,expires_at) VALUES(?,?,?,?)", hex.EncodeToString(sum[:]), now(), now(), exp); e != nil {
+		return e
+	}
+	a.sessionCookie(w, r, token, a.sessionDays*86400)
+	return nil
+}
+
+func (a *App) sessionValid(token string) (lastSeen time.Time, ok bool) {
+	sum := sha256.Sum256([]byte(token))
+	var lastSeenStr, expiresStr string
+	if a.db.QueryRow("SELECT last_seen_at,expires_at FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:])).Scan(&lastSeenStr, &expiresStr) != nil {
+		return time.Time{}, false
+	}
+	expires, e := time.Parse(time.RFC3339, expiresStr)
+	if e != nil || time.Now().UTC().After(expires) {
+		if e == nil {
+			a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:]))
+		}
+		return time.Time{}, false
+	}
+	lastSeen, _ = time.Parse(time.RFC3339, lastSeenStr)
+	return lastSeen, true
+}
+
+// 滑动过期：只要一个月内有访问就自动续期，一个月完全不访问会话才失效。
+func (a *App) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, e := r.Cookie(sessionCookieName)
+		if e != nil || c.Value == "" {
+			errJSON(w, 401, "UNAUTHORIZED", "authentication required")
+			return
+		}
+		lastSeen, ok := a.sessionValid(c.Value)
+		if !ok {
+			errJSON(w, 401, "UNAUTHORIZED", "authentication required")
+			return
+		}
+		if time.Since(lastSeen) > 24*time.Hour {
+			sum := sha256.Sum256([]byte(c.Value))
+			expires := time.Now().UTC().Add(time.Duration(a.sessionDays) * 24 * time.Hour).Format(time.RFC3339)
+			if _, e := a.db.Exec("UPDATE sessions SET last_seen_at=?,expires_at=? WHERE token_hash=?", now(), expires, hex.EncodeToString(sum[:])); e == nil {
+				a.sessionCookie(w, r, c.Value, a.sessionDays*86400)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
+	authed := false
+	if c, e := r.Cookie(sessionCookieName); e == nil && c.Value != "" {
+		if _, ok := a.sessionValid(c.Value); ok {
+			authed = true
+		}
+	}
+	writeJSON(w, 200, map[string]any{"auth_required": a.passwordHash() != "", "authenticated": authed})
+}
+
+func (a *App) authSetup(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if decode(r, &body) != nil {
+		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
+		return
+	}
+	if len(body.Password) < 6 || len(body.Password) > 128 {
+		errJSON(w, 400, "VALIDATION_ERROR", "password must be 6-128 chars")
+		return
+	}
+	if a.passwordHash() != "" {
+		errJSON(w, 409, "CONFLICT", "password already configured")
+		return
+	}
+	h, e := hashPassword(body.Password)
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	if e := a.setPasswordHash(h); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	if e := a.newSession(w, r); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) authLogin(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if a.limiter.blocked(ip) {
+		errJSON(w, 429, "TOO_MANY_ATTEMPTS", "too many attempts, try again later")
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if decode(r, &body) != nil {
+		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
+		return
+	}
+	stored := a.passwordHash()
+	if stored == "" {
+		errJSON(w, 400, "NO_PASSWORD", "password not configured yet")
+		return
+	}
+	if !verifyPassword(stored, body.Password) {
+		a.limiter.fail(ip)
+		errJSON(w, 401, "UNAUTHORIZED", "wrong password")
+		return
+	}
+	a.limiter.reset(ip)
+	if e := a.newSession(w, r); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) authLogout(w http.ResponseWriter, r *http.Request) {
+	if c, e := r.Cookie(sessionCookieName); e == nil {
+		sum := sha256.Sum256([]byte(c.Value))
+		a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:]))
+	}
+	a.sessionCookie(w, r, "", -1)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
 func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	args := []any{}
@@ -415,6 +671,87 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	f.Write(data)
 	z.Close()
 }
+func loadMigrations(db *sql.DB, dir string) error {
+	files, e := filepath.Glob(filepath.Join(dir, "*.up.sql"))
+	if e != nil || len(files) == 0 {
+		return fmt.Errorf("no migration files found in %s", dir)
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		sqlBytes, e := os.ReadFile(f)
+		if e != nil {
+			return e
+		}
+		if _, e := db.Exec(string(sqlBytes)); e != nil {
+			return fmt.Errorf("%s: %w", f, e)
+		}
+	}
+	return nil
+}
+
+func routes(a *App) http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer)
+	r.Get("/health/live", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		if a.db.Ping() != nil {
+			errJSON(w, 503, "DB", "unavailable")
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "ok"})
+	})
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/auth/status", a.authStatus)
+		r.Post("/auth/setup", a.authSetup)
+		r.Post("/auth/login", a.authLogin)
+		r.Post("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+			a.requireAuth(http.HandlerFunc(a.authLogout)).ServeHTTP(w, r)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(a.requireAuth)
+			r.Get("/entries", a.entries)
+			r.Post("/entries", a.create)
+			r.Get("/entries/{id}", a.get)
+			r.Patch("/entries/{id}", a.update)
+			r.Delete("/entries/{id}", a.delete)
+			r.Post("/entries/{id}/copy", a.copy)
+			r.Post("/entries/{id}/media", a.upload)
+			r.Get("/stats", a.stats)
+			r.Get("/sync", a.syncPull)
+			r.Post("/sync/push", a.syncPush)
+			r.Get("/export", a.export)
+			r.Get("/tags", func(w http.ResponseWriter, r *http.Request) {
+				rows, _ := a.db.Query("SELECT DISTINCT tag FROM entry_tags ORDER BY tag")
+				defer rows.Close()
+				o := []string{}
+				for rows.Next() {
+					var t string
+					rows.Scan(&t)
+					o = append(o, t)
+				}
+				writeJSON(w, 200, o)
+			})
+		})
+	})
+	r.With(a.requireAuth).Get("/media/assets/{id}/{variant}", a.mediaFile)
+	frontend := os.Getenv("FOODDIARY_FRONTEND_DIR")
+	if frontend == "" {
+		frontend = "frontend/dist"
+	}
+	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		p := filepath.Join(frontend, filepath.Clean("/"+req.URL.Path))
+		if req.URL.Path == "/" || filepath.Ext(p) == "" {
+			p = filepath.Join(frontend, "index.html")
+		}
+		if _, e := os.Stat(p); e != nil {
+			http.NotFound(w, req)
+			return
+		}
+		http.ServeFile(w, req, p)
+	}))
+	return r
+}
+
 func main() {
 	addr := os.Getenv("FOODDIARY_ADDR")
 	if addr == "" {
@@ -430,65 +767,30 @@ func main() {
 		log.Fatal(e)
 	}
 	db.Exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000")
-	mig, _ := os.ReadFile("backend/migrations/000001_foundation.up.sql")
-	if _, e = db.Exec(string(mig)); e != nil {
+	if e := loadMigrations(db, "backend/migrations"); e != nil {
 		log.Fatal(e)
 	}
-	a := &App{db: db, data: data}
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer)
-	r.Get("/health/live", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
-		if db.Ping() != nil {
-			errJSON(w, 503, "DB", "unavailable")
-			return
+	sessionDays := 30
+	if v := os.Getenv("FOODDIARY_SESSION_DAYS"); v != "" {
+		if n, e := strconv.Atoi(v); e == nil && n > 0 {
+			sessionDays = n
 		}
-		writeJSON(w, 200, map[string]string{"status": "ok"})
-	})
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/entries", a.entries)
-		r.Post("/entries", a.create)
-		r.Get("/entries/{id}", a.get)
-		r.Patch("/entries/{id}", a.update)
-		r.Delete("/entries/{id}", a.delete)
-		r.Post("/entries/{id}/copy", a.copy)
-		r.Post("/entries/{id}/media", a.upload)
-		r.Get("/stats", a.stats)
-		r.Get("/sync", a.syncPull)
-		r.Post("/sync/push", a.syncPush)
-		r.Get("/export", a.export)
-		r.Get("/tags", func(w http.ResponseWriter, r *http.Request) {
-			rows, _ := db.Query("SELECT DISTINCT tag FROM entry_tags ORDER BY tag")
-			defer rows.Close()
-			o := []string{}
-			for rows.Next() {
-				var t string
-				rows.Scan(&t)
-				o = append(o, t)
-			}
-			writeJSON(w, 200, o)
-		})
-	})
-	r.Get("/media/assets/{id}/{variant}", a.mediaFile)
-	frontend := os.Getenv("FOODDIARY_FRONTEND_DIR")
-	if frontend == "" {
-		frontend = "frontend/dist"
 	}
-	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		p := filepath.Join(frontend, filepath.Clean(req.URL.Path))
-		if req.URL.Path == "/" || filepath.Ext(p) == "" {
-			p = filepath.Join(frontend, "index.html")
+	a := &App{db: db, data: data, sessionDays: sessionDays, limiter: newIPLimiter()}
+	if pw := os.Getenv("FOODDIARY_PASSWORD"); pw != "" {
+		if len(pw) < 6 {
+			log.Fatal("FOODDIARY_PASSWORD must be at least 6 chars")
 		}
-		if _, e := os.Stat(p); e != nil {
-			http.NotFound(w, req)
-			return
+		h, e := hashPassword(pw)
+		if e != nil {
+			log.Fatal(e)
 		}
-		http.ServeFile(w, req, p)
-	}))
+		if e := a.setPasswordHash(h); e != nil {
+			log.Fatal(e)
+		}
+		log.Println("password initialized from FOODDIARY_PASSWORD")
+	}
+	db.Exec("DELETE FROM sessions WHERE expires_at < ?", now())
 	log.Printf("FoodDiary listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+	log.Fatal(http.ListenAndServe(addr, routes(a)))
 }
-
-var _ = sha256.Sum256
-var _ = hex.EncodeToString
-var _ = strconv.Itoa

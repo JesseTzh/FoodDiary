@@ -170,19 +170,25 @@ Dexie 数据库 `fooddiary` 包含：
 |---|---|---|
 | GET | `/health/live` | 进程存活 |
 | GET | `/health/ready` | SQLite 可用 |
-| GET | `/api/v1/entries?from=&to=&q=&tag=&page=` | 列表、筛选、分页 |
-| POST | `/api/v1/entries` | 创建记录 |
-| GET | `/api/v1/entries/{id}` | 详情 |
-| PATCH | `/api/v1/entries/{id}` | 更新记录，带 `version` |
-| DELETE | `/api/v1/entries/{id}` | 软删除 |
-| POST | `/api/v1/entries/{id}/copy` | 复制为新记录 |
-| POST | `/api/v1/entries/{id}/media` | multipart 上传照片 |
-| GET | `/media/assets/{id}/{variant}` | `thumbnail`/`preview`/`original` |
-| GET | `/api/v1/stats?from=&to=` | 统计数据 |
-| GET | `/api/v1/tags` | 标签建议 |
-| GET | `/api/v1/sync?cursor=` | 拉取服务端变更 |
-| POST | `/api/v1/sync/push` | 批量提交离线变更 |
-| GET | `/api/v1/export?format=json\|zip` | 导出数据 |
+| GET | `/api/v1/auth/status` | 登录状态（是否已设密码、当前会话是否有效） |
+| POST | `/api/v1/auth/setup` | 首次设置访问密码（仅未设置时可用，重复调用返回 409） |
+| POST | `/api/v1/auth/login` | 密码登录，签发会话 Cookie（失败限速：10 次失败锁 15 分钟） |
+| POST | `/api/v1/auth/logout` | 退出登录，销毁会话 |
+| GET | `/api/v1/entries?from=&to=&q=&tag=&page=` | 列表、筛选、分页（需登录） |
+| POST | `/api/v1/entries` | 创建记录（需登录） |
+| GET | `/api/v1/entries/{id}` | 详情（需登录） |
+| PATCH | `/api/v1/entries/{id}` | 更新记录，带 `version`（需登录） |
+| DELETE | `/api/v1/entries/{id}` | 软删除（需登录） |
+| POST | `/api/v1/entries/{id}/copy` | 复制为新记录（需登录） |
+| POST | `/api/v1/entries/{id}/media` | multipart 上传照片（需登录） |
+| GET | `/media/assets/{id}/{variant}` | `thumbnail`/`preview`/`original`（需登录） |
+| GET | `/api/v1/stats?from=&to=` | 统计数据（需登录） |
+| GET | `/api/v1/tags` | 标签建议（需登录） |
+| GET | `/api/v1/sync?cursor=` | 拉取服务端变更（需登录） |
+| POST | `/api/v1/sync/push` | 批量提交离线变更（需登录） |
+| GET | `/api/v1/export?format=json\|zip` | 导出数据（需登录） |
+
+登录与会话：单密码模式，密码以 PBKDF2-SHA256（600k 次迭代、随机盐）哈希后存于 `app_settings`；除 `/health/*`、`/api/v1/auth/status`、`auth/setup`、`auth/login` 与前端静态资源外全部需要会话。会话为 32 字节随机 token 的 HttpOnly Cookie（SameSite=Lax），仅存 SHA-256 于 `sessions` 表；**滑动过期**：每次访问自动把有效期续到 30 天后（Cookie 同步续期），连续 30 天不访问才失效。`FOODDIARY_PASSWORD` 环境变量可在启动时初始化或重置密码。
 
 创建记录示例：
 
@@ -273,6 +279,8 @@ cd frontend && pnpm exec playwright test
 | `FOODDIARY_FRONTEND_DIR` | `frontend/dist` | SPA 构建目录 |
 | `FOODDIARY_MAX_UPLOAD_BYTES` | `20971520` | 单张图片 20 MiB |
 | `FOODDIARY_MEDIA_RETENTION_DAYS` | `30` | 软删除媒体保留期 |
+| `FOODDIARY_PASSWORD` | 空 | 启动时初始化/重置访问密码；不设置则首次访问在页面设置 |
+| `FOODDIARY_SESSION_DAYS` | `30` | 会话有效期（滑动续期） |
 
 `docker-compose.yml` 暴露 `8080:8080`，挂载 `./data:/data`，设置 `restart: unless-stopped`。生产反向代理必须启用 HTTPS，否则相机、Service Worker 和安装能力会受浏览器安全策略限制；本机开发的 `localhost` 例外。
 
