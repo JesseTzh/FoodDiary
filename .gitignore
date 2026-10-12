@@ -1,21 +1,12 @@
-# Dependencies
-node_modules/
-
-# Build outputs (Vite frontend build, Go binary from Makefile)
+# Build outputs (flutter build-web copies build/web here, Go binary from Makefile)
 dist/
 fooddiary
 *.exe
 *.test
 
-# TypeScript incremental build info
-*.tsbuildinfo
-
 # Go build cache & coverage
 .cache-go/
 *.out
-
-# Frontend test coverage
-coverage/
 
 # Runtime data (docker-compose mounts ./data:/data)
 data/
@@ -30,11 +21,13 @@ data/
 
 # Logs
 *.log
-npm-debug.log*
 
 # IDEs
 .idea/
 .vscode/
+*.iml
+*.ipr
+*.iws
 
 # ZCode
 .zcode/
@@ -42,3 +35,19 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+frontend/android/local.properties
+frontend/android/.gradle/
+frontend/android/key.properties
+**/GeneratedPluginRegistrant.*
+frontend/lib/generated_plugin_registrant.dart
+*.jks
+*.keystore
+.preview/

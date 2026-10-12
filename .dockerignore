@@ -1,0 +1,12 @@
+.git
+.cache-go
+.idea
+.zcode
+data
+frontend/build
+frontend/.dart_tool
+frontend/android/.gradle
+frontend/android/local.properties
+frontend/android/key.properties
+*.jks
+fooddiary

@@ -1,0 +1,24 @@
+name: fooddiary
+description: 和你一起，把平凡的日子做成好吃的样子。
+publish_to: none
+version: 2.0.0+2
+environment:
+  sdk: ^3.13.5
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  image_picker: ^1.2.0
+  shared_preferences: ^2.5.3
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  fonts:
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC.ttf

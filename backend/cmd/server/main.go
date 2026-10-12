@@ -24,9 +24,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type Entry struct {
+	Meal        string           `json:"meal"`
+	Mood        int              `json:"mood"`
+	Favorite    bool             `json:"favorite"`
 	ID          string           `json:"id"`
 	CookedOn    string           `json:"cooked_on"`
 	Title       string           `json:"title"`
@@ -57,10 +61,50 @@ type App struct {
 	data        string
 	sessionDays int
 	limiter     *ipLimiter
+	// 跨源白名单（FOODDIARY_CORS_ORIGINS），为空时禁用 CORS，行为与原来一致
+	corsOrigins []string
+}
+
+// cors 为 Flutter Web 等跨源开发前端放行带凭据的请求；
+// 仅当白名单非空时由 routes() 挂载，生产同源托管不受影响。
+func (a *App) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && a.corsAllowed(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token")
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) corsAllowed(origin string) bool {
+	for _, o := range a.corsOrigins {
+		if strings.EqualFold(strings.TrimSpace(o), origin) {
+			return true
+		}
+	}
+	return false
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
-func id() string  { return fmt.Sprintf("%d", time.Now().UnixNano()) }
+func id() string {
+	var b [16]byte
+	if _, e := rand.Read(b[:]); e != nil {
+		panic(e)
+	}
+	return hex.EncodeToString(b[:])
+}
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -195,6 +239,7 @@ func (a *App) newSession(w http.ResponseWriter, r *http.Request) error {
 	if _, e := a.db.Exec("INSERT INTO sessions(token_hash,created_at,last_seen_at,expires_at) VALUES(?,?,?,?)", hex.EncodeToString(sum[:]), now(), now(), exp); e != nil {
 		return e
 	}
+	w.Header().Set("X-Session-Token", token)
 	a.sessionCookie(w, r, token, a.sessionDays*86400)
 	return nil
 }
@@ -216,9 +261,19 @@ func (a *App) sessionValid(token string) (lastSeen time.Time, ok bool) {
 	return lastSeen, true
 }
 
-func (a *App) authed(r *http.Request) bool {
+func sessionToken(r *http.Request) string {
+	if v := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); v != "" && v != r.Header.Get("Authorization") {
+		return v
+	}
 	c, e := r.Cookie(sessionCookieName)
-	if e != nil || c.Value == "" {
+	if e != nil {
+		return ""
+	}
+	return c.Value
+}
+func (a *App) authed(r *http.Request) bool {
+	c := &http.Cookie{Value: sessionToken(r)}
+	if c.Value == "" {
 		return false
 	}
 	_, ok := a.sessionValid(c.Value)
@@ -228,8 +283,8 @@ func (a *App) authed(r *http.Request) bool {
 // 滑动过期：只要一个月内有访问就自动续期，一个月完全不访问会话才失效。
 func (a *App) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, e := r.Cookie(sessionCookieName)
-		if e != nil || c.Value == "" {
+		c := &http.Cookie{Value: sessionToken(r)}
+		if c.Value == "" {
 			errJSON(w, 401, "UNAUTHORIZED", "authentication required")
 			return
 		}
@@ -320,7 +375,8 @@ func (a *App) authLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) authLogout(w http.ResponseWriter, r *http.Request) {
-	if c, e := r.Cookie(sessionCookieName); e == nil {
+	if token := sessionToken(r); token != "" {
+		c := &http.Cookie{Value: token}
 		sum := sha256.Sum256([]byte(c.Value))
 		a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:]))
 	}
@@ -348,11 +404,18 @@ func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "category = ?")
 		args = append(args, x)
 	}
+	if q.Get("favorite") == "true" {
+		where = append(where, "favorite=1")
+	}
+	if x := q.Get("month"); x != "" {
+		where = append(where, "substr(cooked_on,1,7)=?")
+		args = append(args, x)
+	}
 	if x := q.Get("rating"); x != "" {
 		where = append(where, "rating = ?")
 		args = append(args, x)
 	}
-	rows, e := a.db.Query("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests FROM diary_entries WHERE "+strings.Join(where, " AND ")+" ORDER BY cooked_on DESC,created_at DESC", args...)
+	rows, e := a.db.Query("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests,meal,mood,favorite FROM diary_entries WHERE "+strings.Join(where, " AND ")+" ORDER BY cooked_on DESC,created_at DESC", args...)
 	if e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
@@ -363,7 +426,7 @@ func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 		var x Entry
 		var ij, sj string
 		var shared int
-		if e := rows.Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared); e != nil {
+		if e := rows.Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared, &x.Meal, &x.Mood, &x.Favorite); e != nil {
 			continue
 		}
 		x.SharedWithGuests = shared == 1
@@ -415,7 +478,7 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var ij, sj string
 	var shared int
-	if e := a.db.QueryRow("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests FROM diary_entries WHERE id=? AND deleted_at IS NULL", id).Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared); e != nil {
+	if e := a.db.QueryRow("SELECT id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,shared_with_guests,meal,mood,favorite FROM diary_entries WHERE id=? AND deleted_at IS NULL", id).Scan(&x.ID, &x.CookedOn, &x.Title, &x.Category, &x.Duration, &x.Difficulty, &x.Rating, &ij, &sj, &x.Notes, &x.CreatedAt, &x.UpdatedAt, &x.Version, &shared, &x.Meal, &x.Mood, &x.Favorite); e != nil {
 		errJSON(w, 404, "NOT_FOUND", "entry not found")
 		return
 	}
@@ -491,10 +554,10 @@ func (a *App) guestGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, x)
 }
 func valid(x Entry) error {
-	if len(strings.TrimSpace(x.Title)) < 1 || len(x.Title) > 80 {
+	if len(strings.TrimSpace(x.Title)) < 1 || utf8.RuneCountInString(x.Title) > 80 {
 		return fmt.Errorf("title must be 1-80 chars")
 	}
-	if len(x.CookedOn) != 10 {
+	if _, e := time.Parse("2006-01-02", x.CookedOn); e != nil {
 		return fmt.Errorf("cooked_on must be YYYY-MM-DD")
 	}
 	if x.Rating != nil && (*x.Rating < 1 || *x.Rating > 5) {
@@ -503,9 +566,26 @@ func valid(x Entry) error {
 	if x.Difficulty != nil && (*x.Difficulty < 1 || *x.Difficulty > 5) {
 		return fmt.Errorf("difficulty must be 1-5")
 	}
+	if utf8.RuneCountInString(x.Notes) > 200 {
+		return fmt.Errorf("心得最多 200 字")
+	}
+	if x.Mood < 0 || x.Mood > 4 {
+		return fmt.Errorf("心情无效")
+	}
+	if x.Meal == "" {
+		x.Meal = "晚餐"
+	}
+	if x.Meal != "" && x.Meal != "早餐" && x.Meal != "午餐" && x.Meal != "晚餐" && x.Meal != "下午茶" {
+		return fmt.Errorf("餐次无效")
+	}
+	if len(x.Tags) > 12 {
+		return fmt.Errorf("标签最多 12 个")
+	}
 	return nil
 }
-func (a *App) create(w http.ResponseWriter, r *http.Request) {
+func (a *App) create(w http.ResponseWriter, r *http.Request) { a.saveEntry(w, r, false) }
+func (a *App) update(w http.ResponseWriter, r *http.Request) { a.saveEntry(w, r, true) }
+func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 	var x Entry
 	if decode(r, &x) != nil {
 		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
@@ -515,10 +595,13 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "VALIDATION_ERROR", e.Error())
 		return
 	}
-	x.ID = id()
-	x.CreatedAt = now()
-	x.UpdatedAt = x.CreatedAt
-	x.Version = 1
+	x.Title = strings.TrimSpace(x.Title)
+	if x.Meal == "" {
+		x.Meal = "晚餐"
+	}
+	if x.Category == "" {
+		x.Category = "家常菜"
+	}
 	if x.Ingredients == nil {
 		x.Ingredients = []map[string]any{}
 	}
@@ -527,59 +610,65 @@ func (a *App) create(w http.ResponseWriter, r *http.Request) {
 	}
 	ij, _ := json.Marshal(x.Ingredients)
 	sj, _ := json.Marshal(x.Steps)
-	tx, _ := a.db.Begin()
-	_, e := tx.Exec("INSERT INTO diary_entries(id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", x.ID, x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.CreatedAt, x.UpdatedAt, x.Version)
+	tx, e := a.db.Begin()
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	defer tx.Rollback()
+	x.UpdatedAt = now()
+	if editing {
+		x.ID = chi.URLParam(r, "id")
+		var ver int
+		if e = tx.QueryRow("SELECT version,created_at FROM diary_entries WHERE id=? AND deleted_at IS NULL", x.ID).Scan(&ver, &x.CreatedAt); e != nil {
+			errJSON(w, 404, "NOT_FOUND", "entry not found")
+			return
+		}
+		if x.Version != ver {
+			errJSON(w, 409, "CONFLICT", "这份日记已被更新，请重新打开后编辑")
+			return
+		}
+		x.Version = ver + 1
+		var result sql.Result
+		result, e = tx.Exec("UPDATE diary_entries SET cooked_on=?,title=?,category=?,duration_minutes=?,difficulty=?,rating=?,ingredients_json=?,steps_json=?,notes=?,updated_at=?,version=?,meal=?,mood=?,favorite=? WHERE id=? AND version=? AND deleted_at IS NULL", x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.UpdatedAt, x.Version, x.Meal, x.Mood, x.Favorite, x.ID, ver)
+		if e == nil {
+			if n, _ := result.RowsAffected(); n == 0 {
+				errJSON(w, 409, "CONFLICT", "这份日记已被更新")
+				return
+			}
+		}
+		if e == nil {
+			_, e = tx.Exec("DELETE FROM entry_tags WHERE entry_id=?", x.ID)
+		}
+	} else {
+		x.ID = id()
+		x.CreatedAt = x.UpdatedAt
+		x.Version = 1
+		_, e = tx.Exec("INSERT INTO diary_entries(id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,meal,mood,favorite) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", x.ID, x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.CreatedAt, x.UpdatedAt, x.Version, x.Meal, x.Mood, x.Favorite)
+	}
 	if e == nil {
 		for _, t := range x.Tags {
-			tx.Exec("INSERT OR IGNORE INTO entry_tags(entry_id,tag) VALUES(?,?)", x.ID, t)
+			if _, e = tx.Exec("INSERT OR IGNORE INTO entry_tags(entry_id,tag) VALUES(?,?)", x.ID, t); e != nil {
+				break
+			}
 		}
-		tx.Exec("INSERT INTO sync_changes(entity_type,entity_id,operation,version,changed_at) VALUES('entry',?,'upsert',?,?)", x.ID, x.Version, x.UpdatedAt)
 	}
-	if e != nil {
-		tx.Rollback()
-		errJSON(w, 500, "DB", e.Error())
-		return
+	if e == nil {
+		_, e = tx.Exec("INSERT INTO sync_changes(entity_type,entity_id,operation,version,changed_at) VALUES('entry',?,'upsert',?,?)", x.ID, x.Version, x.UpdatedAt)
 	}
-	tx.Commit()
-	writeJSON(w, 201, x)
-}
-func (a *App) update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var x Entry
-	if decode(r, &x) != nil {
-		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
-		return
+	if e == nil {
+		e = tx.Commit()
 	}
-	if e := valid(x); e != nil {
-		errJSON(w, 400, "VALIDATION_ERROR", e.Error())
-		return
-	}
-	var ver int
-	if e := a.db.QueryRow("SELECT version FROM diary_entries WHERE id=? AND deleted_at IS NULL", id).Scan(&ver); e != nil {
-		errJSON(w, 404, "NOT_FOUND", "entry not found")
-		return
-	}
-	if x.Version > 0 && x.Version != ver {
-		errJSON(w, 409, "CONFLICT", "version conflict")
-		return
-	}
-	x.ID = id
-	x.Version = ver + 1
-	x.UpdatedAt = now()
-	ij, _ := json.Marshal(x.Ingredients)
-	sj, _ := json.Marshal(x.Steps)
-	_, e := a.db.Exec("UPDATE diary_entries SET cooked_on=?,title=?,category=?,duration_minutes=?,difficulty=?,rating=?,ingredients_json=?,steps_json=?,notes=?,updated_at=?,version=? WHERE id=?", x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.UpdatedAt, x.Version, id)
 	if e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	a.db.Exec("DELETE FROM entry_tags WHERE entry_id=?", id)
-	for _, t := range x.Tags {
-		a.db.Exec("INSERT OR IGNORE INTO entry_tags(entry_id,tag) VALUES(?,?)", id, t)
+	x.Media = a.media(x.ID)
+	status := 201
+	if editing {
+		status = 200
 	}
-	a.db.Exec("INSERT INTO sync_changes(entity_type,entity_id,operation,version,changed_at) VALUES('entry',?,'upsert',?,?)", id, x.Version, x.UpdatedAt)
-	x.CreatedAt = ""
-	writeJSON(w, 200, x)
+	writeJSON(w, status, x)
 }
 func (a *App) delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -609,12 +698,15 @@ func (a *App) copy(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal([]byte(sj), &x.Steps)
 	x.Tags = a.tags(id0)
 	x.CookedOn = time.Now().Format("2006-01-02")
+	if x.Meal == "" {
+		x.Meal = "晚餐"
+	}
 	x.ID = id()
 	x.CreatedAt = now()
 	x.UpdatedAt = x.CreatedAt
 	x.Version = 1
 	tx, _ := a.db.Begin()
-	_, e := tx.Exec("INSERT INTO diary_entries(id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", x.ID, x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.CreatedAt, x.UpdatedAt, x.Version)
+	_, e := tx.Exec("INSERT INTO diary_entries(id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,meal,mood,favorite) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", x.ID, x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.CreatedAt, x.UpdatedAt, x.Version, x.Meal, x.Mood, x.Favorite)
 	if e != nil {
 		tx.Rollback()
 		errJSON(w, 500, "DB", e.Error())
@@ -643,43 +735,70 @@ func (a *App) stats(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	entry := chi.URLParam(r, "id")
-	if _, err := os.Stat(filepath.Join(a.data, "media")); err != nil {
-		os.MkdirAll(filepath.Join(a.data, "media"), 0755)
-	}
-	if err := r.ParseMultipartForm(25 << 20); err != nil {
-		errJSON(w, 400, "VALIDATION_ERROR", "invalid multipart")
+	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
+	if e := r.ParseMultipartForm(2 << 20); e != nil {
+		errJSON(w, 400, "VALIDATION_ERROR", "单张照片不能超过 20 MB")
 		return
 	}
-	f, h, err := r.FormFile("file")
-	if err != nil {
-		errJSON(w, 400, "VALIDATION_ERROR", "file is required")
+	defer r.MultipartForm.RemoveAll()
+	f, h, e := r.FormFile("file")
+	if e != nil {
+		errJSON(w, 400, "VALIDATION_ERROR", "请选择照片")
 		return
 	}
 	defer f.Close()
+	raw, e := io.ReadAll(io.LimitReader(f, (20<<20)+1))
+	if e != nil || len(raw) > 20<<20 {
+		errJSON(w, 400, "VALIDATION_ERROR", "单张照片不能超过 20 MB")
+		return
+	}
+	mime := http.DetectContentType(raw)
+	if mime != "image/jpeg" && mime != "image/png" && mime != "image/webp" && mime != "image/gif" {
+		errJSON(w, 400, "VALIDATION_ERROR", "照片仅支持 JPEG、PNG、WebP、GIF")
+		return
+	}
+	tx, e := a.db.Begin()
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	defer tx.Rollback()
+	var count int
+	if e = tx.QueryRow("SELECT count(*) FROM diary_entries WHERE id=? AND deleted_at IS NULL", entry).Scan(&count); e != nil || count == 0 {
+		errJSON(w, 404, "NOT_FOUND", "entry not found")
+		return
+	}
+	if e = tx.QueryRow("SELECT count(*) FROM media_assets WHERE entry_id=?", entry).Scan(&count); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	if count >= 9 {
+		errJSON(w, 400, "VALIDATION_ERROR", "最多可以保存 9 张照片")
+		return
+	}
+	if e = os.MkdirAll(filepath.Join(a.data, "media"), 0755); e != nil {
+		errJSON(w, 500, "MEDIA", e.Error())
+		return
+	}
 	mid := id()
 	dst := filepath.Join(a.data, "media", mid)
-	out, err := os.Create(dst)
-	if err != nil {
-		errJSON(w, 500, "MEDIA", err.Error())
+	sum := sha256.Sum256(raw)
+	if e = os.WriteFile(dst, raw, 0600); e != nil {
+		errJSON(w, 500, "MEDIA", e.Error())
 		return
 	}
-	n, err := io.Copy(out, io.LimitReader(f, 20<<20))
-	out.Close()
-	if err != nil {
-		errJSON(w, 500, "MEDIA", err.Error())
+	_, e = tx.Exec("INSERT INTO media_assets(id,entry_id,original_name,mime,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?)", mid, entry, h.Filename, mime, len(raw), hex.EncodeToString(sum[:]), now())
+	if e == nil {
+		e = tx.Commit()
+	}
+	if e != nil {
+		os.Remove(dst)
+		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	mime := h.Header.Get("Content-Type")
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	_, err = a.db.Exec("INSERT INTO media_assets(id,entry_id,original_name,mime,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?)", mid, entry, h.Filename, mime, n, "", now())
-	if err != nil {
-		errJSON(w, 500, "DB", err.Error())
-		return
-	}
-	writeJSON(w, 201, Media{ID: mid, EntryID: entry, Mime: mime, Size: n, URL: "/media/assets/" + mid + "/original"})
+	writeJSON(w, 201, Media{ID: mid, EntryID: entry, Mime: mime, Size: int64(len(raw)), URL: "/media/assets/" + mid + "/original"})
 }
+
 // 已开放给游客的记录，其照片允许未登录访问；其余仍要求有效会话。
 func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -687,6 +806,14 @@ func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 401, "UNAUTHORIZED", "authentication required")
 		return
 	}
+	var mime string
+	if e := a.db.QueryRow("SELECT m.mime FROM media_assets m JOIN diary_entries e ON e.id=m.entry_id WHERE m.id=? AND e.deleted_at IS NULL", id).Scan(&mime); e != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeFile(w, r, filepath.Join(a.data, "media", id))
 }
 
@@ -696,41 +823,6 @@ func (a *App) mediaShared(mediaID string) bool {
 		return false
 	}
 	return shared == 1
-}
-func (a *App) syncPush(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Operations []struct {
-			ID      string `json:"id"`
-			Payload Entry  `json:"payload"`
-		} `json:"operations"`
-	}
-	if decode(r, &body) != nil {
-		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
-		return
-	}
-	results := []any{}
-	for _, op := range body.Operations {
-		if op.ID == "" {
-			continue
-		}
-		results = append(results, map[string]any{"id": op.ID, "status": "accepted"})
-	}
-	writeJSON(w, 200, map[string]any{"results": results})
-}
-func (a *App) syncPull(w http.ResponseWriter, r *http.Request) {
-	cur, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
-	rows, _ := a.db.Query("SELECT seq,entity_type,entity_id,operation,version,changed_at FROM sync_changes WHERE seq>? ORDER BY seq LIMIT 500", cur)
-	defer rows.Close()
-	out := []map[string]any{}
-	next := cur
-	for rows.Next() {
-		var seq, ver int64
-		var typ, eid, op, t string
-		rows.Scan(&seq, &typ, &eid, &op, &ver, &t)
-		out = append(out, map[string]any{"seq": seq, "entity_type": typ, "entity_id": eid, "operation": op, "version": ver, "changed_at": t})
-		next = seq
-	}
-	writeJSON(w, 200, map[string]any{"changes": out, "cursor": next})
 }
 func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	format := r.URL.Query().Get("format")
@@ -760,6 +852,7 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	f.Write(data)
 	z.Close()
 }
+
 // 按文件名顺序执行未应用过的迁移；已应用的记录在 schema_migrations 中，避免重放
 // （如 ALTER TABLE 这类非幂等语句）。
 func loadMigrations(db *sql.DB, dir string) error {
@@ -797,6 +890,9 @@ func loadMigrations(db *sql.DB, dir string) error {
 func routes(a *App) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer)
+	if len(a.corsOrigins) > 0 {
+		r.Use(a.cors)
+	}
 	r.Get("/health/live", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		if a.db.Ping() != nil {
@@ -826,8 +922,7 @@ func routes(a *App) http.Handler {
 			r.Post("/entries/{id}/media", a.upload)
 			r.Post("/entries/{id}/guest-share", a.guestShare)
 			r.Get("/stats", a.stats)
-			r.Get("/sync", a.syncPull)
-			r.Post("/sync/push", a.syncPush)
+			a.kitchenRoutes(r)
 			r.Get("/export", a.export)
 			r.Get("/tags", func(w http.ResponseWriter, r *http.Request) {
 				rows, _ := a.db.Query("SELECT DISTINCT tag FROM entry_tags ORDER BY tag")
@@ -845,9 +940,16 @@ func routes(a *App) http.Handler {
 	r.Get("/media/assets/{id}/{variant}", a.mediaFile)
 	frontend := os.Getenv("FOODDIARY_FRONTEND_DIR")
 	if frontend == "" {
-		frontend = "frontend/dist"
+		frontend = "frontend/build/web"
 	}
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/") || strings.HasPrefix(req.URL.Path, "/media/") {
+			http.NotFound(w, req)
+			return
+		}
+		if req.URL.Path == "/sw.js" || req.URL.Path == "/index.html" || req.URL.Path == "/flutter_bootstrap.js" {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		p := filepath.Join(frontend, filepath.Clean("/"+req.URL.Path))
 		if req.URL.Path == "/" || filepath.Ext(p) == "" {
 			p = filepath.Join(frontend, "index.html")
@@ -871,7 +973,7 @@ func main() {
 		data = "./data"
 	}
 	os.MkdirAll(data, 0755)
-	db, e := sql.Open("sqlite3", filepath.Join(data, "app.db"))
+	db, e := sql.Open("sqlite3", filepath.Join(data, "app.db")+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -886,6 +988,13 @@ func main() {
 		}
 	}
 	a := &App{db: db, data: data, sessionDays: sessionDays, limiter: newIPLimiter()}
+	if v := os.Getenv("FOODDIARY_CORS_ORIGINS"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				a.corsOrigins = append(a.corsOrigins, o)
+			}
+		}
+	}
 	if pw := os.Getenv("FOODDIARY_PASSWORD"); pw != "" {
 		if len(pw) < 6 {
 			log.Fatal("FOODDIARY_PASSWORD must be at least 6 chars")

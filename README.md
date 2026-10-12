@@ -1,82 +1,108 @@
-# FoodDiary 🍳
+# 做饭日记 · FoodDiary
 
-移动端优先的「每日做饭成果」记录 PWA：记录每天做了什么菜，附成品照片、用料、步骤、耗时和评分，支持离线记录与数据导出。
+和你一起，把平凡的日子做成好吃的样子。
+
+Flutter 3.47.7 / Dart 3.13 构建一套适配手机和桌面的界面；Web 使用 CanvasKit，支持安装为 PWA；Android 使用 Flutter 原生渲染。Go 1.26 + SQLite 后端负责密码登录、日记、照片、菜谱、收藏、个人资料和食材清单。
 
 ## 功能
 
-- 记录管理：菜名、分类、用料、步骤、耗时、难度、评分、标签、备注与成品照片（拍照/相册）
-- 登录保护：单密码访问，首次使用在页面设置密码；会话自动续期，一个月不活跃才需重新登录
-- 游客浏览：可把指定记录标记为「开放给游客」，未登录访客在登录页即可只读浏览这些记录（含照片），未开放记录对游客不可见
-- 回顾：今日首页、时间线浏览、按菜名/标签搜索
-- 统计：本月做饭天数、菜品数量、平均评分、连续天数、最常做分类
-- PWA：可安装到手机主屏，Service Worker 离线缓存，断网时保存本机、联网后同步
-- 导出：JSON（含记录）与 ZIP（含照片）一键下载
+- 首页：虎鼠厨房插画、今日记录入口、推荐菜谱、最近日记。
+- 日记：按年月筛选、搜索菜名/心得/标签、详情、编辑、删除和收藏。
+- 记录：日期、餐次、菜品名称、200 字心得、标签、五种心情、相机/相册照片，最多 9 张。
+- 菜谱：分类、搜索、食材和做法、收藏、创建自己的菜谱、一键开始做饭记录。
+- 我的：实际记录天数、创建菜谱数、收藏数、资料设置和食材采购清单。
+- PWA：可安装、离线应用壳、上次加载的日记/菜谱快照、已访问照片缓存、版本更新提示。离线模式为只读；不提供离线写入队列。
+- Android：相机、相册、持久化登录、可配置服务地址、APK/AAB 构建。
 
-## 技术栈
+视觉采用参考图的奶油色、橙黄按钮、圆角卡片及虎鼠插画。`frontend/assets/images` 为用户提供的参考图裁切资源；默认菜谱仅作初始内容，日记和统计从真实数据开始。发布前请确认参考图素材的使用授权，并按需替换为高分辨率独立素材。Noto Sans SC 字体使用 SIL OFL，许可位于 `frontend/assets/fonts/OFL.txt`。
 
-| 端 | 技术 |
-|---|---|
-| 前端 | React + TypeScript + Vite + React Router，PWA（manifest + Service Worker） |
-| 后端 | Go + chi + SQLite（WAL），golang-migrate 迁移，本地文件存储媒体 |
-| 部署 | 多阶段 Docker 构建，Go 单体托管 API、前端静态资源和媒体文件 |
-| CI | GitHub Actions：构建、测试与空数据卷启动验证、远程部署脚本 |
+## 开发
 
-## 快速开始
-
-本地开发（同时启动 Go API `:8080` 和 Vite dev server）：
-
-```bash
+```sh
+cd frontend
+flutter pub get
+cd ..
 make dev
 ```
 
-生产运行（Docker，访问 http://localhost:8080，数据持久化在 `./data`，拉取 `jessetzh/fooddiary` 镜像）：
+API 默认 `http://localhost:8080`，Flutter Web `http://localhost:5173`。首次进入设置厨房密码，以后使用该密码登录。开发环境 CORS 仅允许指定的前端来源。Android 和 Web 使用相同接口；Web 使用 HttpOnly Cookie，Android 使用存储在本机的会话令牌。
 
-```bash
-docker compose up -d
+Android 模拟器：
+
+```sh
+cd frontend
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 ```
 
-本地构建镜像并运行：
+真机可在登录页的「设置服务地址」输入服务的 HTTPS 地址。正式 Android 包仅允许 HTTPS；调试包允许 HTTP。
 
-```bash
-docker build -t jessetzh/fooddiary:latest .
-docker compose up -d
+## 构建
+
+```sh
+make check             # go vet + flutter analyze
+make build             # CanvasKit PWA + Go 可执行文件
+make apk API_BASE_URL=https://your-domain.example
+make appbundle API_BASE_URL=https://your-domain.example
 ```
 
-## 常用命令
+Web 构建必须使用 `make web` 或 `./scripts/build-web.sh`，脚本会在 Flutter 构建后生成 PWA Service Worker。直接执行 `flutter build web` 不会生成自定义 `sw.js`。
 
-```bash
-make dev      # 前后端同时开发
-make build    # 构建前端 + Go 二进制
-make check    # go test/vet + 前端类型检查与构建
-npm run test  # 前端单元测试
+输出：
+
+- Web：`frontend/build/web/`
+- 后端：`fooddiary`
+- APK：`frontend/build/app/outputs/flutter-apk/app-release.apk`
+- AAB：`frontend/build/app/outputs/bundle/release/app-release.aab`
+
+`frontend/web/flutter_bootstrap.js` 显式指定 `renderer: 'canvaskit'`；构建使用 `--no-web-resources-cdn`，CanvasKit 和中文字体随站点打包。不要添加 `--wasm`，它会选择不同的渲染链路。
+
+Android 正式签名：复制 `frontend/android/key.properties.example` 为 `key.properties`，配置自己的 keystore。没有该文件时使用开发签名，便于安装预览；商店发布需要自己的签名。不要提交密钥或密码。
+
+## 运行和部署
+
+```sh
+make build
+./fooddiary
+# 或从源码构建 Docker 镜像
+ docker build -t fooddiary:local .
+ docker run --rm -p 8080:8080 -v fooddiary-data:/data fooddiary:local
 ```
 
-## 目录结构
+Go 同时托管 API、照片和 Web 资源，生产建议同源 HTTPS 部署，PWA 安装及相机访问需要 HTTPS 或 localhost。
 
-```text
-frontend/            # React PWA（Vite）
-backend/
-├── cmd/server/      # Go 服务入口与路由
-├── internal/        # 内部包
-└── migrations/      # SQLite 迁移
-docs/DEVELOPMENT.md  # 详细开发文档（产品范围、API 契约、数据模型、路线图）
-scripts/ci/          # CI 辅助脚本（启动验证、远程部署）
-```
-
-## 配置
-
-| 环境变量 | 默认值 | 说明 |
+| 环境变量 | 默认值 | 用途 |
 |---|---|---|
 | `FOODDIARY_ADDR` | `:8080` | 监听地址 |
-| `FOODDIARY_DATA_DIR` | `/data` | SQLite 与媒体根目录 |
-| `FOODDIARY_FRONTEND_DIR` | `frontend/dist` | SPA 构建产物目录 |
-| `FOODDIARY_MAX_UPLOAD_BYTES` | `20971520` | 单张图片上限（20 MiB） |
-| `FOODDIARY_MEDIA_RETENTION_DAYS` | `30` | 已删除媒体保留天数 |
-| `FOODDIARY_PASSWORD` | 空 | 启动时初始化/重置访问密码；不设置则在首次访问页面时设置 |
-| `FOODDIARY_SESSION_DAYS` | `30` | 会话有效期；每次访问自动续期 |
+| `FOODDIARY_DATA_DIR` | `./data` | SQLite 和照片 |
+| `FOODDIARY_FRONTEND_DIR` | `frontend/build/web` | Web 构建目录 |
+| `FOODDIARY_PASSWORD` | 空 | 启动时设置或重置厨房密码 |
+| `FOODDIARY_SESSION_DAYS` | `30` | 会话有效期 |
+| `FOODDIARY_CORS_ORIGINS` | 空 | 逗号分隔的跨源来源白名单 |
 
-> 生产环境需启用 HTTPS（反向代理），否则相机调用、PWA 安装等能力会受浏览器安全策略限制。
+`data` 保存真实用户资料，重构不会删除现有数据库。新版以新界面和数据契约为准，不承诺旧客户端兼容。迁移 `000004_kitchen.up.sql` 增加新版业务字段、菜谱和食材清单。
 
-## API 概览
+CI 分别执行静态检查、CanvasKit PWA 构建、Android APK 构建和容器空数据启动检查，然后沿用镜像发布与部署流程。配置仓库变量 `API_BASE_URL` 可指定 APK 默认服务器；也可在 App 内修改。
 
-统一前缀 `/api/v1`：`auth/status`、`auth/setup`、`auth/login`、`auth/logout` 登录保护（会话 Cookie，HttpOnly），其余接口均需登录；`entries` 增删改查与复制、`entries/{id}/guest-share` 开放/取消开放给游客、`entries/{id}/media` 照片上传、`stats` 统计、`tags` 标签、`sync` 离线同步、`export` 导出；游客免登录只读接口为 `guest/entries` 与 `guest/entries/{id}`（仅返回开放记录），开放记录的照片可直接访问，其余媒体仍需登录；健康检查位于 `/health/live` 与 `/health/ready`。完整契约见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+详细接口和结构见 [开发说明](docs/DEVELOPMENT.md)。
+
+## GitHub Release 发布 APK
+
+新增 `.github/workflows/android-release.yml`：推送 `v*` 标签自动构建并将 APK、SHA-256 文件上传到同名 GitHub Release；也可在 Actions → Android Release → Run workflow 填写已有标签手动发布。
+
+```sh
+git tag v2.0.0
+git push origin v2.0.0
+```
+
+可选仓库变量 `API_BASE_URL` 设置 APK 的默认 HTTPS 后端地址，手动触发时也可覆盖。未设置时，可在 App 登录页配置地址。
+
+正式签名需要以下 GitHub Actions Secrets（四项均配置）：
+
+| Secret | 内容 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | 正式 keystore 文件的 Base64 内容 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | 密钥别名 |
+| `ANDROID_KEY_PASSWORD` | 密钥密码 |
+
+未配置签名 Secrets 时，工作流使用开发签名生成可安装的预览 APK，并在 Release 说明中标明。签名文件仅在 Runner 临时目录生成，结束时清理。工作流使用 `GITHUB_TOKEN` 的 `contents: write` 权限创建或更新 Release，无需额外 PAT。

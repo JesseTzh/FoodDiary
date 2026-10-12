@@ -362,3 +362,82 @@ func TestMigrationsIdempotent(t *testing.T) {
 		t.Fatalf("schema_migrations rows: got %d (%v), want 3", applied, e)
 	}
 }
+
+func newCORSTestServer(t *testing.T, origins ...string) *httptest.Server {
+	t.Helper()
+	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	db.Exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000")
+	if e := loadMigrations(db, "../../migrations"); e != nil {
+		t.Fatal(e)
+	}
+	a := &App{db: db, data: t.TempDir(), sessionDays: 30, limiter: newIPLimiter(), corsOrigins: origins}
+	ts := httptest.NewServer(routes(a))
+	t.Cleanup(func() { ts.Close(); db.Close() })
+	return ts
+}
+
+func TestCORSAllowedOrigin(t *testing.T) {
+	ts := newCORSTestServer(t, "http://localhost:5173")
+	req, _ := http.NewRequest("OPTIONS", ts.URL+"/api/v1/entries", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	resp, e := http.DefaultClient.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("preflight: got %d, want 204", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("preflight ACAO: got %q", got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("preflight ACAC: got %q", got)
+	}
+
+	req, _ = http.NewRequest("GET", ts.URL+"/api/v1/auth/status", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	resp, e = http.DefaultClient.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("status ACAO: got %q", got)
+	}
+}
+
+func TestCORSDisallowedOrigin(t *testing.T) {
+	ts := newCORSTestServer(t, "http://localhost:5173")
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/auth/status", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	resp, e := http.DefaultClient.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("unlisted origin must not get ACAO, got %q", got)
+	}
+}
+
+func TestCORSDisabledByDefault(t *testing.T) {
+	ts, _ := newTestServer(t)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/auth/status", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	resp, e := http.DefaultClient.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("CORS must stay off by default, got ACAO %q", got)
+	}
+}
