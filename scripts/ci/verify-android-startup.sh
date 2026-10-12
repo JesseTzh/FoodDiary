@@ -21,12 +21,15 @@ collect_diagnostics() {
   trap - EXIT
   log "Collecting diagnostics (exit status: ${status})"
   timeout 15s adb logcat -d -v threadtime > "$ARTIFACTS/logcat.txt" 2>&1 || true
+  timeout 15s adb logcat -d -b crash -v threadtime > "$ARTIFACTS/crash-logcat.txt" 2>&1 || true
   timeout 15s adb shell dumpsys activity activities > "$ARTIFACTS/activities.txt" 2>&1 || true
   timeout 15s adb shell dumpsys window > "$ARTIFACTS/windows.txt" 2>&1 || true
   if [[ "$status" -ne 0 ]]; then
     timeout 15s adb exec-out screencap -p > "$ARTIFACTS/failure.png" || true
     log 'Recent Android logcat:'
     tail -n 120 "$ARTIFACTS/logcat.txt" || true
+    log 'Android crash logcat:'
+    cat "$ARTIFACTS/crash-logcat.txt" || true
     log 'Activity state:'
     grep -E '(mResumedActivity|topResumedActivity|mFocusedApp)' \
       "$ARTIFACTS/activities.txt" || true
@@ -64,7 +67,10 @@ grep -q '^Status: ok' "$ARTIFACTS/launch.txt" || {
   exit 1
 }
 
-APP_PID="$(timeout 15s adb shell pidof "$PACKAGE" | tr -d '\r' | awk '{print $1}')"
+APP_PID="$(timeout 15s adb shell pidof "$PACKAGE" | tr -d '\r' | awk '{print $1}')" || {
+  echo 'App process did not start or exited immediately' >&2
+  exit 1
+}
 if [[ -z "$APP_PID" ]]; then
   echo 'App process did not start' >&2
   exit 1
@@ -76,7 +82,10 @@ log "Application process started with PID ${APP_PID}"
 # remains alive instead of requiring one PID for the entire interval.
 for ((attempt = 0; attempt < 20; attempt++)); do
   sleep 1
-  CURRENT_PID="$(timeout 15s adb shell pidof "$PACKAGE" | tr -d '\r' | awk '{print $1}')"
+  CURRENT_PID="$(timeout 15s adb shell pidof "$PACKAGE" | tr -d '\r' | awk '{print $1}')" || {
+    echo 'App process exited during startup' >&2
+    exit 1
+  }
   [[ -n "$CURRENT_PID" ]] || {
     echo 'App process exited during startup' >&2
     exit 1

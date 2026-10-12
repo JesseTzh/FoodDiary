@@ -1,6 +1,6 @@
 # Build outputs (flutter build-web copies build/web here, Go binary from Makefile)
 dist/
-fooddiary
+/fooddiary
 *.exe
 *.test
 
