@@ -9,7 +9,7 @@ fooddiary
 *.out
 
 # Runtime data (docker-compose mounts ./data:/data)
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3
