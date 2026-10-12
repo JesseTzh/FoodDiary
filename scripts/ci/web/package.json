@@ -1,0 +1,11 @@
+{
+  "name": "fooddiary-web-smoke",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
+  }
+}

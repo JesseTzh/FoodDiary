@@ -9,4 +9,7 @@ frontend/android/.gradle
 frontend/android/local.properties
 frontend/android/key.properties
 *.jks
+**/node_modules
+web-startup-artifacts
+android-startup-artifacts
 fooddiary

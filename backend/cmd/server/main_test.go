@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -292,12 +294,21 @@ func TestGuestShareFlow(t *testing.T) {
 	}
 }
 
+func testJPEG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func uploadMedia(t *testing.T, c *http.Client, base, entryID, name string) string {
 	t.Helper()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	fw, _ := w.CreateFormFile("file", name)
-	fw.Write([]byte("jpeg-bytes"))
+	fw.Write(testJPEG(t))
 	w.Close()
 	resp, e := c.Post(base+"/api/v1/entries/"+entryID+"/media", w.FormDataContentType(), &buf)
 	if e != nil {
@@ -329,7 +340,7 @@ func TestGuestMediaAccess(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != "jpeg-bytes" {
+	if !bytes.Equal(body, testJPEG(t)) {
 		t.Fatalf("media content: got %q", body)
 	}
 	if got := statusOf(t, get(t, guest, ts.URL+"/media/assets/"+privateMedia+"/original")); got != 401 {
@@ -357,9 +368,13 @@ func TestMigrationsIdempotent(t *testing.T) {
 	if e := db.QueryRow("SELECT COUNT(*) FROM diary_entries WHERE shared_with_guests=0").Scan(&n); e != nil {
 		t.Fatalf("shared_with_guests column missing: %v", e)
 	}
+	migrations, e := filepath.Glob("../../migrations/*.up.sql")
+	if e != nil || len(migrations) == 0 {
+		t.Fatalf("migration files: %v (%v)", migrations, e)
+	}
 	var applied int
-	if e := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&applied); e != nil || applied != 3 {
-		t.Fatalf("schema_migrations rows: got %d (%v), want 3", applied, e)
+	if e := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&applied); e != nil || applied != len(migrations) {
+		t.Fatalf("schema_migrations rows: got %d (%v), want %d", applied, e, len(migrations))
 	}
 }
 

@@ -93,3 +93,18 @@ API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON�
 `make check` 执行 Go vet 和 Flutter analyze；`make build` 生成后端与 PWA；`make apk` 生成 APK。修改 Web 后必须重新执行构建脚本，确保离线资源版本与页面一致。
 
 生产反向代理需放行 `.wasm`、字体与 `/media/`，保留服务器返回的 WASM MIME。`index.html`、`flutter_bootstrap.js` 和 `sw.js` 不应被代理长时间缓存。数据库和照片统一备份 `FOODDIARY_DATA_DIR`，不要把该目录放进镜像。
+
+### 本地验证 CI Web 截图
+
+需要 Docker、Node.js 22、curl 和 jq：
+
+```sh
+npm ci --prefix scripts/ci/web
+(cd scripts/ci/web && npx playwright install chromium)
+docker build -t fooddiary-ci:local .
+./scripts/ci/verify-fresh-start.sh
+```
+
+脚本只接受不存在的命名数据卷，避免误用已有数据；默认卷名 `fooddiary-ci-data`，结束时清理本次容器和卷。并行运行时通过 `CI_CONTAINER`、`CI_VOLUME` 和 `CI_HOST_PORT` 指定不同资源；`CI_ARTIFACTS_DIR` 可指定截图目录。容器清理前保存日志，Cookie 临时文件不作为 Artifact 上传。每个 Web 阶段使用新的浏览器上下文，避免会话及 PWA 缓存掩盖初始化问题。
+
+浏览器依赖锁定在 `scripts/ci/web/package-lock.json`；升级 Playwright 后应重新安装对应 Chromium。查看 trace：`npx --prefix scripts/ci/web playwright show-trace web-startup-artifacts/after-restart-trace.zip`。Trace 可能包含本次测试的会话信息，仅使用 CI 临时测试数据。

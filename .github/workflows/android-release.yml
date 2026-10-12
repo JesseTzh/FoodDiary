@@ -26,6 +26,7 @@ jobs:
   release:
     name: Build and publish APK
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
       API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.API_BASE_URL }}
@@ -50,6 +51,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -95,6 +98,10 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
+      - name: Analyze Flutter
+        working-directory: frontend
+        run: flutter analyze
+
       - name: Build APK
         working-directory: frontend
         shell: bash
@@ -106,6 +113,29 @@ jobs:
             BUILD_ARGS+=(--dart-define="API_BASE_URL=$API_BASE_URL")
           fi
           flutter build apk "${BUILD_ARGS[@]}"
+
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Verify release APK startup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/ci/verify-android-startup.sh frontend/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload startup screenshot and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fooddiary-release-android-startup
+          path: android-startup-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Prepare release files
         shell: bash
@@ -129,6 +159,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fooddiary-${{ env.RELEASE_TAG }}-android
+          compression-level: 0
+          retention-days: 14
           path: |
             release-artifacts/*.apk
             release-artifacts/*.sha256

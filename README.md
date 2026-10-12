@@ -81,17 +81,19 @@ Go 同时托管 API、照片和 Web 资源，生产建议同源 HTTPS 部署，P
 
 `data` 保存真实用户资料，重构不会删除现有数据库。新版以新界面和数据契约为准，不承诺旧客户端兼容。迁移 `000004_kitchen.up.sql` 增加新版业务字段、菜谱和食材清单。
 
-CI 分别执行静态检查、CanvasKit PWA 构建、Android APK 构建和容器空数据启动检查，然后沿用镜像发布与部署流程。配置仓库变量 `API_BASE_URL` 可指定 APK 默认服务器；也可在 App 内修改。
+CI 在 PR、main 推送和手动运行时，并行执行 Go 单元测试与 vet、Flutter analyze、生产 Docker 镜像构建与 Web 冒烟测试、Android APK 构建。Web 不再在静态检查任务里重复构建；Docker 构建使用 GitHub Actions BuildKit 缓存，发布多架构镜像时复用已验证的 amd64 构建层。
 
-Pipeline 的 `Verify APK startup on Android emulator` 任务下载本次构建的 release APK，在 Android 15（API 35）x86_64 模拟器上安装并启动，检查启动状态、进程持续存活 20 秒、Activity 位于前台，以及应用日志中没有致命错误。检查通过后才继续镜像发布。该任务随 main 分支推送、`v*` 标签、Pull Request 和手动运行 Pipeline 触发。
+Web 冒烟测试通过 Chromium 访问镜像实际提供的 CanvasKit 前端，检查空数据卷首次设置密码页、登录后首页和重启后的记录展示，同时验证 API 登录与数据持久化。下载 Actions Artifact `fooddiary-web-startup` 可查看 `first-run.png`、`home.png`、`after-restart.png`，以及浏览器日志、Playwright trace 和容器日志；失败时也收集诊断，保留 14 天。测试通过页面语义等待真实 UI，不依赖固定截图延迟。截图用于人工检查，暂不执行像素基线比较。当前容器运行验证覆盖 amd64，发布同时构建 arm64。
 
-在该次 Actions 运行页面的 Artifacts 中下载 `fooddiary-android-startup`，可查看 `startup.png` 启动界面截图和启动、Activity、Logcat 日志，保留 14 天。检查失败时也会尝试保存 `failure.png` 与诊断日志。这是启动冒烟检查；登录和后端接口功能仍需单独测试，截图中的界面取决于 APK 配置的服务地址是否可用。
+非 PR 运行在 Go、Flutter、Web 检查通过后发布 Docker 镜像；main 随后部署。Android 验证独立执行，不阻塞 Web 发布与部署，但失败仍会使对应 Actions 检查失败。Pipeline 的 `Verify APK startup on Android emulator` 下载本次 release APK，在 Android 15（API 35）x86_64 模拟器检查安装启动、进程持续存活、前台 Activity 和致命错误日志。`v*` 标签的 APK 构建和启动验证统一交给 Android Release，避免两个 workflow 重复构建 APK。配置仓库变量 `API_BASE_URL` 可指定 APK 默认服务器；也可在 App 内修改。
+
+下载 Artifact `fooddiary-android-startup`（Android Release 中为 `fooddiary-release-android-startup`）可查看 `startup.png` 和启动、Activity、Logcat 日志，保留 14 天；失败时尝试保存 `failure.png`。Android 检查属于启动冒烟检查，登录与后端接口功能仍需单独测试。
 
 详细接口和结构见 [开发说明](docs/DEVELOPMENT.md)。
 
 ## GitHub Release 发布 APK
 
-新增 `.github/workflows/android-release.yml`：推送 `v*` 标签自动构建并将 APK、SHA-256 文件上传到同名 GitHub Release；也可在 Actions → Android Release → Run workflow 填写已有标签手动发布。
+新增 `.github/workflows/android-release.yml`：推送 `v*` 标签自动构建、完成 Flutter 分析与模拟器启动验证后，将 APK、SHA-256 文件上传到同名 GitHub Release；也可在 Actions → Android Release → Run workflow 填写已有标签手动发布。
 
 ```sh
 git tag v2.0.0

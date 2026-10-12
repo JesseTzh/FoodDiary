@@ -10,17 +10,25 @@ HOST_PORT="${CI_HOST_PORT:-18080}"
 BASE_URL="http://127.0.0.1:${HOST_PORT}"
 READY_URL="${BASE_URL}/health/ready"
 PASSWORD="ci-password-1234"
+ARTIFACTS="${CI_ARTIFACTS_DIR:-web-startup-artifacts}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COOKIE_JAR="$(mktemp)"
+mkdir -p "$ARTIFACTS"
 
 cleanup() {
   local status=$?
-  if [[ "$status" -ne 0 ]]; then
-    docker logs "$CONTAINER" 2>/dev/null || true
-  fi
+  trap - EXIT
+  docker logs "$CONTAINER" > "$ARTIFACTS/container.log" 2>&1 || true
+  docker inspect "$CONTAINER" > "$ARTIFACTS/container-inspect.json" 2>&1 || true
   docker rm --force "$CONTAINER" 2>/dev/null || true
   docker volume rm "$VOLUME" 2>/dev/null || true
   rm -f "$COOKIE_JAR"
   exit "$status"
+}
+
+verify_web() {
+  CI_BASE_URL="$BASE_URL" CI_PASSWORD="$PASSWORD" CI_ARTIFACTS_DIR="$ARTIFACTS" \
+    CI_ENTRY_TITLE="${TITLE:-}" node "$SCRIPT_DIR/web/smoke.mjs" "$1"
 }
 
 wait_ready() {
@@ -38,6 +46,14 @@ wait_ready() {
 
 trap cleanup EXIT
 
+# Fail rather than silently reusing stale state or deleting another run's data.
+if docker volume inspect "$VOLUME" > /dev/null 2>&1 || docker container inspect "$CONTAINER" > /dev/null 2>&1; then
+  echo "Fresh-start container or volume already exists: $CONTAINER / $VOLUME" >&2
+  trap - EXIT
+  rm -f "$COOKIE_JAR"
+  exit 1
+fi
+
 docker volume create "$VOLUME"
 
 docker run --detach --name "$CONTAINER" \
@@ -54,6 +70,7 @@ STATUS="$(curl --fail --silent --show-error "$BASE_URL/api/v1/auth/status")"
 echo "$STATUS" | jq -e '.data.auth_required == false and .data.authenticated == false' > /dev/null
 CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' "$BASE_URL/api/v1/entries")"
 [[ "$CODE" == "401" ]]
+verify_web first-run
 
 # First visit: set the password, which also logs in and issues the session cookie.
 CODE="$(curl --fail --silent --show-error \
@@ -68,6 +85,7 @@ CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data "{\"password\":\"$PASSWORD\"}")"
 [[ "$CODE" == "409" ]]
+verify_web home
 
 # Create one entry against the empty data volume, with the session cookie.
 TITLE="CI fresh-start $(date -u +%Y%m%dT%H%M%SZ)"
@@ -79,9 +97,10 @@ ENTRY_ID="$(
     --data "{\"cooked_on\":\"$(date -u +%F)\",\"title\":\"$TITLE\"}" \
     | jq --raw-output '.data.id'
 )"
-[[ -n "$ENTRY_ID" ]]
+[[ -n "$ENTRY_ID" && "$ENTRY_ID" != "null" ]]
 
 # Restart against the same volume: the password and the entry must survive.
+docker logs "$CONTAINER" > "$ARTIFACTS/before-restart-container.log" 2>&1
 docker rm --force "$CONTAINER"
 docker run --detach --name "$CONTAINER" \
   --publish "127.0.0.1:${HOST_PORT}:8080" \
@@ -107,5 +126,6 @@ SAVED_TITLE="$(curl --fail --silent --show-error \
   --cookie "$COOKIE_JAR" \
   "$BASE_URL/api/v1/entries/$ENTRY_ID" | jq --raw-output '.data.title')"
 [[ "$SAVED_TITLE" == "$TITLE" ]]
+verify_web after-restart
 
 echo "fresh-start verified: login flow and entry $ENTRY_ID survived a container restart"
