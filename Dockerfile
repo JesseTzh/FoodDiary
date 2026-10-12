@@ -1,6 +1,11 @@
-FROM --platform=$BUILDPLATFORM ghcr.io/cirruslabs/flutter:3.47.7 AS frontend
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+FROM --platform=$BUILDPLATFORM ubuntu:24.04 AS frontend
+ARG FLUTTER_VERSION=3.47.7
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git libglu1-mesa python3 unzip xz-utils zip \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git /opt/flutter
+ENV PATH="/opt/flutter/bin:${PATH}"
+RUN flutter precache --web
 WORKDIR /app/frontend
 COPY frontend/pubspec.yaml frontend/pubspec.lock ./
 RUN flutter pub get

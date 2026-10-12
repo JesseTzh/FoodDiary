@@ -76,6 +76,44 @@ jobs:
           name: fooddiary-android
           path: frontend/build/app/outputs/flutter-apk/app-release.apk
 
+  android-startup:
+    name: Verify APK startup on Android emulator
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: fooddiary-android
+          path: android-apk
+
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Install and launch APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/ci/verify-android-startup.sh android-apk/app-release.apk
+
+      - name: Upload startup screenshot and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fooddiary-android-startup
+          path: android-startup-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
   fresh-start:
     name: Start from an empty data volume
     runs-on: ubuntu-latest
@@ -97,6 +135,7 @@ jobs:
       - check
       - fresh-start
       - android
+      - android-startup
     runs-on: ubuntu-latest
     permissions:
       contents: read

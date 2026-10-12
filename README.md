@@ -83,6 +83,10 @@ Go 同时托管 API、照片和 Web 资源，生产建议同源 HTTPS 部署，P
 
 CI 分别执行静态检查、CanvasKit PWA 构建、Android APK 构建和容器空数据启动检查，然后沿用镜像发布与部署流程。配置仓库变量 `API_BASE_URL` 可指定 APK 默认服务器；也可在 App 内修改。
 
+Pipeline 的 `Verify APK startup on Android emulator` 任务下载本次构建的 release APK，在 Android 15（API 35）x86_64 模拟器上安装并启动，检查启动状态、进程持续存活 20 秒、Activity 位于前台，以及应用日志中没有致命错误。检查通过后才继续镜像发布。该任务随 main 分支推送、`v*` 标签、Pull Request 和手动运行 Pipeline 触发。
+
+在该次 Actions 运行页面的 Artifacts 中下载 `fooddiary-android-startup`，可查看 `startup.png` 启动界面截图和启动、Activity、Logcat 日志，保留 14 天。检查失败时也会尝试保存 `failure.png` 与诊断日志。这是启动冒烟检查；登录和后端接口功能仍需单独测试，截图中的界面取决于 APK 配置的服务地址是否可用。
+
 详细接口和结构见 [开发说明](docs/DEVELOPMENT.md)。
 
 ## GitHub Release 发布 APK
