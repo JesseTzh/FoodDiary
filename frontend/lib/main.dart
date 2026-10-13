@@ -34,9 +34,19 @@ class _FoodDiaryAppState extends State<FoodDiaryApp> {
     title: '做饭日记',
     debugShowCheckedModeBanner: false,
     theme: kitchenTheme(),
-    home: ready
-        ? Kitchen(api: api)
-        : const Scaffold(body: Center(child: CircularProgressIndicator())),
+    home: ready ? Kitchen(api: api) : const _OpeningPage(),
+  );
+}
+
+class _OpeningPage extends StatelessWidget {
+  const _OpeningPage();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: const Color(0xFFFFFAF3),
+    body: SizedBox.expand(
+      child: Image.asset('assets/images/opening-page.png', fit: BoxFit.cover),
+    ),
   );
 }
 
