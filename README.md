@@ -76,8 +76,12 @@ Go 同时托管 API、照片和 Web 资源，生产建议同源 HTTPS 部署，P
 | `FOODDIARY_DATA_DIR` | `./data` | SQLite 和照片 |
 | `FOODDIARY_FRONTEND_DIR` | `frontend/build/web` | Web 构建目录 |
 | `FOODDIARY_PASSWORD` | 空 | 启动时设置或重置厨房密码 |
-| `FOODDIARY_SESSION_DAYS` | `30` | 会话有效期 |
+| `FOODDIARY_JWT_SECRET` | 自动生成并保存到 `data/jwt.key` | 至少 32 字节的十六进制 HS256 签名密钥 |
 | `FOODDIARY_CORS_ORIGINS` | 空 | 逗号分隔的跨源来源白名单 |
+
+认证使用 `golang-jwt/jwt/v5 v5.3.1`：访问 JWT 有效 15 分钟，自动刷新；Web 登录固定有效 7 天，App 固定有效 30 天，刷新不延长登录期限；每次登录都会创建独立设备会话，支持多端同时在线，退出某一端不会影响其他端。升级 JWT 后旧登录失效，需要重新登录，旧版客户端需同步升级。退出或刷新令牌重放仅撤销对应设备会话；通过 `FOODDIARY_PASSWORD` 更改密码会撤销全部会话，同一密码下重启服务保留所有设备登录。`FOODDIARY_SESSION_DAYS` 已移除。
+
+生产必须使用 HTTPS；反向代理应覆盖客户端传入的 `X-Forwarded-Proto` 并保留原始 Host。登录限速按直连 IP 计算，不信任外部 `X-Forwarded-For`，代理部署时同一代理后的用户共享限速。签名密钥自动持久化，备份时包含 `jwt.key`；多实例需使用相同密钥与数据库。配置新密钥后旧 JWT 失效，若要强制所有客户端重新登录，应同时撤销数据库会话。Web 使用 HttpOnly、SameSite=Lax Cookie，HTTPS 下标记 Secure；写请求校验 Origin（允许显式 CORS 白名单），App 使用安全存储并发送 `X-FoodDiary-Client: app`。不要将不可信来源加入 CORS 白名单。
 
 `data` 保存真实用户资料，重构不会删除现有数据库。新版以新界面和数据契约为准，不承诺旧客户端兼容。迁移 `000004_kitchen.up.sql` 增加新版业务字段、菜谱和食材清单。
 

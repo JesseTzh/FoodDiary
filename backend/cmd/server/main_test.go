@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	neturl "net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 func newTestServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	t.Helper()
-	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
+	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db")+"?_foreign_keys=on&_busy_timeout=5000&_txlock=immediate")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -26,7 +27,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	if e := loadMigrations(db, "../../migrations"); e != nil {
 		t.Fatal(e)
 	}
-	a := &App{db: db, data: t.TempDir(), sessionDays: 30, limiter: newIPLimiter()}
+	a := &App{db: db, data: t.TempDir(), jwtKey: []byte("01234567890123456789012345678901"), limiter: newIPLimiter()}
 	ts := httptest.NewServer(routes(a))
 	t.Cleanup(func() { ts.Close(); db.Close() })
 	return ts, db
@@ -40,7 +41,11 @@ func newClient() *http.Client {
 func postJSON(t *testing.T, c *http.Client, url string, body any) *http.Response {
 	t.Helper()
 	b, _ := json.Marshal(body)
-	resp, e := c.Post(url, "application/json", bytes.NewReader(b))
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	origin, _ := neturl.Parse(url)
+	req.Header.Set("Origin", origin.Scheme+"://"+origin.Host)
+	resp, e := c.Do(req)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -164,30 +169,32 @@ func TestExpiredSessionRejected(t *testing.T) {
 	}
 }
 
-func TestSessionSlidingRenewal(t *testing.T) {
+func TestSessionHasFixedWebLifetime(t *testing.T) {
 	ts, db := newTestServer(t)
 	c := newClient()
 	postJSON(t, c, ts.URL+"/api/v1/auth/setup", map[string]string{"password": "hunter2"})
 
-	// 把会话改成“29 天前最后活跃、今天到期”，一次访问后应续期 30 天
-	past := time.Now().UTC().Add(-29 * 24 * time.Hour).Format(time.RFC3339)
-	if _, e := db.Exec("UPDATE sessions SET created_at=?,last_seen_at=?", past, past); e != nil {
+	var before, after string
+	if e := db.QueryRow("SELECT expires_at FROM sessions LIMIT 1").Scan(&before); e != nil {
 		t.Fatal(e)
 	}
-	if got := statusOf(t, get(t, c, ts.URL+"/api/v1/entries")); got != 200 {
-		t.Fatalf("entries: got %d, want 200", got)
+	if got := statusOf(t, postJSON(t, c, ts.URL+"/api/v1/auth/refresh", nil)); got != 200 {
+		t.Fatalf("refresh: %d", got)
 	}
-	var expires string
-	if e := db.QueryRow("SELECT expires_at FROM sessions LIMIT 1").Scan(&expires); e != nil {
+	if e := db.QueryRow("SELECT expires_at FROM sessions LIMIT 1").Scan(&after); e != nil {
 		t.Fatal(e)
 	}
-	exp, e := time.Parse(time.RFC3339, expires)
+	if before != after {
+		t.Fatal("refresh extended fixed deadline")
+	}
+	exp, e := time.Parse(time.RFC3339, after)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if d := time.Until(exp); d < 29*24*time.Hour {
-		t.Fatalf("session should be renewed to ~30 days, got %.1f days", d.Hours()/24)
+	if d := time.Until(exp); d < 7*24*time.Hour-time.Minute || d > 7*24*time.Hour {
+		t.Fatalf("Web lifetime: %v", d)
 	}
+
 }
 
 func TestVerifyPassword(t *testing.T) {
@@ -310,7 +317,10 @@ func uploadMedia(t *testing.T, c *http.Client, base, entryID, name string) strin
 	fw, _ := w.CreateFormFile("file", name)
 	fw.Write(testJPEG(t))
 	w.Close()
-	resp, e := c.Post(base+"/api/v1/entries/"+entryID+"/media", w.FormDataContentType(), &buf)
+	req, _ := http.NewRequest("POST", base+"/api/v1/entries/"+entryID+"/media", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Origin", base)
+	resp, e := c.Do(req)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -353,7 +363,7 @@ func TestGuestMediaAccess(t *testing.T) {
 }
 
 func TestMigrationsIdempotent(t *testing.T) {
-	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
+	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db")+"?_foreign_keys=on&_busy_timeout=5000&_txlock=immediate")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -380,7 +390,7 @@ func TestMigrationsIdempotent(t *testing.T) {
 
 func newCORSTestServer(t *testing.T, origins ...string) *httptest.Server {
 	t.Helper()
-	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
+	db, e := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db")+"?_foreign_keys=on&_busy_timeout=5000&_txlock=immediate")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -388,7 +398,7 @@ func newCORSTestServer(t *testing.T, origins ...string) *httptest.Server {
 	if e := loadMigrations(db, "../../migrations"); e != nil {
 		t.Fatal(e)
 	}
-	a := &App{db: db, data: t.TempDir(), sessionDays: 30, limiter: newIPLimiter(), corsOrigins: origins}
+	a := &App{db: db, data: t.TempDir(), jwtKey: []byte("01234567890123456789012345678901"), limiter: newIPLimiter(), corsOrigins: origins}
 	ts := httptest.NewServer(routes(a))
 	t.Cleanup(func() { ts.Close(); db.Close() })
 	return ts

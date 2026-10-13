@@ -32,7 +32,8 @@ scripts/build-pwa.py             根据实际构建资源生成版本化离线�
 | GET | `/auth/status` | 是否设置密码、当前是否登录 |
 | POST | `/auth/setup` | 首次设置密码并登录 |
 | POST | `/auth/login` | 密码登录 |
-| POST | `/auth/logout` | 退出并销毁会话 |
+| POST | `/auth/refresh` | 轮换刷新令牌并获取新的访问 JWT |
+| POST | `/auth/logout` | 退出并即时撤销整个会话 |
 | GET | `/entries?q=&month=&favorite=true` | 日记列表，返回 items / total |
 | POST | `/entries` | 新增日记 |
 | GET | `/entries/{id}` | 日记详情，包含照片 |
@@ -50,7 +51,11 @@ scripts/build-pwa.py             根据实际构建资源生成版本化离线�
 | PATCH | `/groceries/{id}` | `{ "checked": true }` |
 | DELETE | `/groceries/{id}` | 删除食材 |
 
-以上业务接口均需要登录。Web 请求带 Cookie；Android 从登录响应的 `X-Session-Token` 读取会话令牌，之后使用 `Authorization: Bearer <token>`。令牌只在数据库中保存 SHA-256 哈希，采用已有的会话过期和密码限速机制。跨源 Web 开发配置 CORS 白名单；生产采用同源托管。
+以上业务接口均需要登录。访问令牌为 HS256 JWT（`golang-jwt/jwt/v5 v5.3.1`），有效 15 分钟，严格验证算法、签名、issuer、audience、subject、exp、iat、nbf、jti 和 sid，且每次检查数据库会话是否仍有效。Web 会话固定 7 天、Android 固定 30 天；刷新不延长期限。每次登录创建独立会话，支持多端同时在线，单端退出或刷新令牌重放只撤销该端的会话；配置密码不变时重启保留会话，密码真正变化时原子地更新密码并撤销所有端的会话。刷新令牌为 32 字节随机值，数据库只保存 SHA-256 哈希；原令牌轮换后保留消费记录，重放会撤销整个会话，退出同样即时撤销访问 JWT。
+
+Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在路径 `/api/v1/auth` 的 `fooddiary_refresh` HttpOnly Cookie；刷新接口无需有效访问 JWT。Android 登录、刷新请求必须带 `X-FoodDiary-Client: app`，响应 `X-Session-Token` 和 `X-Refresh-Token` 分别提供访问和刷新令牌，存入 flutter_secure_storage；业务请求使用访问 JWT 的 `Authorization: Bearer <token>`，刷新和退出则使用刷新令牌。浏览器响应不暴露令牌头。
+
+浏览器写请求（包括登录）要求 Origin 与同源或 CORS 白名单匹配；没有 Origin 的原生请求要求 `X-FoodDiary-Client: app`。客户端遇到访问 JWT 过期会自动刷新并重试一次，并合并同一 Api 实例的并发刷新。升级迁移清除旧会话；旧版客户端需升级并重新登录。签名密钥配置、HTTPS 和反向代理注意事项见 README。
 
 日记写入示例：
 

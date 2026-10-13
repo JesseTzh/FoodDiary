@@ -57,10 +57,10 @@ type Media struct {
 	URL     string `json:"url"`
 }
 type App struct {
-	db          *sql.DB
-	data        string
-	sessionDays int
-	limiter     *ipLimiter
+	db      *sql.DB
+	data    string
+	jwtKey  []byte
+	limiter *ipLimiter
 	// 跨源白名单（FOODDIARY_CORS_ORIGINS），为空时禁用 CORS，行为与原来一致
 	corsOrigins []string
 }
@@ -74,11 +74,11 @@ func (a *App) cors(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token, X-Refresh-Token")
 			if r.Method == http.MethodOptions {
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-				w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-FoodDiary-Client")
+				w.Header().Set("Access-Control-Expose-Headers", "X-Session-Token, X-Refresh-Token")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -201,9 +201,6 @@ func (l *ipLimiter) reset(ip string) {
 }
 
 func clientIP(r *http.Request) string {
-	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-		return strings.TrimSpace(strings.Split(xf, ",")[0])
-	}
 	if host, _, e := net.SplitHostPort(r.RemoteAddr); e == nil {
 		return host
 	}
@@ -218,90 +215,6 @@ func (a *App) passwordHash() string {
 func (a *App) setPasswordHash(hash string) error {
 	_, e := a.db.Exec("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", passwordSettingKey, hash)
 	return e
-}
-
-func (a *App) sessionCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Value: token, Path: "/",
-		MaxAge: maxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
-	})
-}
-
-func (a *App) newSession(w http.ResponseWriter, r *http.Request) error {
-	raw := make([]byte, 32)
-	if _, e := rand.Read(raw); e != nil {
-		return e
-	}
-	token := hex.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(token))
-	exp := time.Now().UTC().Add(time.Duration(a.sessionDays) * 24 * time.Hour).Format(time.RFC3339)
-	if _, e := a.db.Exec("INSERT INTO sessions(token_hash,created_at,last_seen_at,expires_at) VALUES(?,?,?,?)", hex.EncodeToString(sum[:]), now(), now(), exp); e != nil {
-		return e
-	}
-	w.Header().Set("X-Session-Token", token)
-	a.sessionCookie(w, r, token, a.sessionDays*86400)
-	return nil
-}
-
-func (a *App) sessionValid(token string) (lastSeen time.Time, ok bool) {
-	sum := sha256.Sum256([]byte(token))
-	var lastSeenStr, expiresStr string
-	if a.db.QueryRow("SELECT last_seen_at,expires_at FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:])).Scan(&lastSeenStr, &expiresStr) != nil {
-		return time.Time{}, false
-	}
-	expires, e := time.Parse(time.RFC3339, expiresStr)
-	if e != nil || time.Now().UTC().After(expires) {
-		if e == nil {
-			a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:]))
-		}
-		return time.Time{}, false
-	}
-	lastSeen, _ = time.Parse(time.RFC3339, lastSeenStr)
-	return lastSeen, true
-}
-
-func sessionToken(r *http.Request) string {
-	if v := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); v != "" && v != r.Header.Get("Authorization") {
-		return v
-	}
-	c, e := r.Cookie(sessionCookieName)
-	if e != nil {
-		return ""
-	}
-	return c.Value
-}
-func (a *App) authed(r *http.Request) bool {
-	c := &http.Cookie{Value: sessionToken(r)}
-	if c.Value == "" {
-		return false
-	}
-	_, ok := a.sessionValid(c.Value)
-	return ok
-}
-
-// 滑动过期：只要一个月内有访问就自动续期，一个月完全不访问会话才失效。
-func (a *App) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c := &http.Cookie{Value: sessionToken(r)}
-		if c.Value == "" {
-			errJSON(w, 401, "UNAUTHORIZED", "authentication required")
-			return
-		}
-		lastSeen, ok := a.sessionValid(c.Value)
-		if !ok {
-			errJSON(w, 401, "UNAUTHORIZED", "authentication required")
-			return
-		}
-		if time.Since(lastSeen) > 24*time.Hour {
-			sum := sha256.Sum256([]byte(c.Value))
-			expires := time.Now().UTC().Add(time.Duration(a.sessionDays) * 24 * time.Hour).Format(time.RFC3339)
-			if _, e := a.db.Exec("UPDATE sessions SET last_seen_at=?,expires_at=? WHERE token_hash=?", now(), expires, hex.EncodeToString(sum[:])); e == nil {
-				a.sessionCookie(w, r, c.Value, a.sessionDays*86400)
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (a *App) authStatus(w http.ResponseWriter, r *http.Request) {
@@ -332,8 +245,13 @@ func (a *App) authSetup(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	if e := a.setPasswordHash(h); e != nil {
-		errJSON(w, 500, "DB", e.Error())
+	result, e := a.db.Exec("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING", passwordSettingKey, h)
+	if e != nil {
+		errJSON(w, 500, "DB", "could not configure password")
+		return
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		errJSON(w, 409, "CONFLICT", "password already configured")
 		return
 	}
 	if e := a.newSession(w, r); e != nil {
@@ -356,6 +274,11 @@ func (a *App) authLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "VALIDATION_ERROR", "invalid JSON")
 		return
 	}
+	if len(body.Password) > 128 {
+		a.limiter.fail(ip)
+		errJSON(w, 401, "UNAUTHORIZED", "wrong password")
+		return
+	}
 	stored := a.passwordHash()
 	if stored == "" {
 		errJSON(w, 400, "NO_PASSWORD", "password not configured yet")
@@ -371,16 +294,6 @@ func (a *App) authLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true})
-}
-
-func (a *App) authLogout(w http.ResponseWriter, r *http.Request) {
-	if token := sessionToken(r); token != "" {
-		c := &http.Cookie{Value: token}
-		sum := sha256.Sum256([]byte(c.Value))
-		a.db.Exec("DELETE FROM sessions WHERE token_hash=?", hex.EncodeToString(sum[:]))
-	}
-	a.sessionCookie(w, r, "", -1)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
@@ -889,7 +802,7 @@ func loadMigrations(db *sql.DB, dir string) error {
 
 func routes(a *App) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer, a.protectBrowserWrites)
 	if len(a.corsOrigins) > 0 {
 		r.Use(a.cors)
 	}
@@ -905,9 +818,8 @@ func routes(a *App) http.Handler {
 		r.Get("/auth/status", a.authStatus)
 		r.Post("/auth/setup", a.authSetup)
 		r.Post("/auth/login", a.authLogin)
-		r.Post("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
-			a.requireAuth(http.HandlerFunc(a.authLogout)).ServeHTTP(w, r)
-		})
+		r.Post("/auth/refresh", a.authRefresh)
+		r.Post("/auth/logout", a.authLogout)
 		// 游客浏览：公开只读接口，仅暴露标记为开放的记录
 		r.Get("/guest/entries", a.guestEntries)
 		r.Get("/guest/entries/{id}", a.guestGet)
@@ -973,7 +885,7 @@ func main() {
 		data = "./data"
 	}
 	os.MkdirAll(data, 0755)
-	db, e := sql.Open("sqlite3", filepath.Join(data, "app.db")+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, e := sql.Open("sqlite3", filepath.Join(data, "app.db")+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate")
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -981,13 +893,11 @@ func main() {
 	if e := loadMigrations(db, "backend/migrations"); e != nil {
 		log.Fatal(e)
 	}
-	sessionDays := 30
-	if v := os.Getenv("FOODDIARY_SESSION_DAYS"); v != "" {
-		if n, e := strconv.Atoi(v); e == nil && n > 0 {
-			sessionDays = n
-		}
+	key, e := loadJWTKey(data)
+	if e != nil {
+		log.Fatal(e)
 	}
-	a := &App{db: db, data: data, sessionDays: sessionDays, limiter: newIPLimiter()}
+	a := &App{db: db, data: data, jwtKey: key, limiter: newIPLimiter()}
 	if v := os.Getenv("FOODDIARY_CORS_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
@@ -996,17 +906,18 @@ func main() {
 		}
 	}
 	if pw := os.Getenv("FOODDIARY_PASSWORD"); pw != "" {
-		if len(pw) < 6 {
-			log.Fatal("FOODDIARY_PASSWORD must be at least 6 chars")
+		if len(pw) < 6 || len(pw) > 128 {
+			log.Fatal("FOODDIARY_PASSWORD must be 6-128 chars")
 		}
-		h, e := hashPassword(pw)
+		changed, e := a.configurePassword(pw)
 		if e != nil {
 			log.Fatal(e)
 		}
-		if e := a.setPasswordHash(h); e != nil {
-			log.Fatal(e)
+		if changed {
+			log.Println("FOODDIARY_PASSWORD initialized or changed; all sessions revoked")
+		} else {
+			log.Println("FOODDIARY_PASSWORD unchanged; existing device sessions preserved")
 		}
-		log.Println("password initialized from FOODDIARY_PASSWORD")
 	}
 	db.Exec("DELETE FROM sessions WHERE expires_at < ?", now())
 	log.Printf("FoodDiary listening on %s", addr)

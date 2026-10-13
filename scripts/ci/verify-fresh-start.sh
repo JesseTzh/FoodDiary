@@ -76,6 +76,7 @@ verify_web first-run
 CODE="$(curl --fail --silent --show-error \
   --request POST "$BASE_URL/api/v1/auth/setup" \
   --header 'Content-Type: application/json' \
+  --header "Origin: $BASE_URL" \
   --cookie-jar "$COOKIE_JAR" \
   --data "{\"password\":\"$PASSWORD\"}" \
   --output /dev/null --write-out '%{http_code}')"
@@ -83,6 +84,7 @@ CODE="$(curl --fail --silent --show-error \
 CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --request POST "$BASE_URL/api/v1/auth/setup" \
   --header 'Content-Type: application/json' \
+  --header "Origin: $BASE_URL" \
   --data "{\"password\":\"$PASSWORD\"}")"
 [[ "$CODE" == "409" ]]
 verify_web home
@@ -93,6 +95,7 @@ ENTRY_ID="$(
   curl --fail --silent --show-error \
     --request POST "$BASE_URL/api/v1/entries" \
     --header 'Content-Type: application/json' \
+    --header "Origin: $BASE_URL" \
     --cookie "$COOKIE_JAR" \
     --data "{\"cooked_on\":\"$(date -u +%F)\",\"title\":\"$TITLE\"}" \
     | jq --raw-output '.data.id'
@@ -112,11 +115,13 @@ wait_ready 30
 CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --request POST "$BASE_URL/api/v1/auth/login" \
   --header 'Content-Type: application/json' \
+  --header "Origin: $BASE_URL" \
   --data '{"password":"wrong-password"}')"
 [[ "$CODE" == "401" ]]
 CODE="$(curl --fail --silent --show-error \
   --request POST "$BASE_URL/api/v1/auth/login" \
   --header 'Content-Type: application/json' \
+  --header "Origin: $BASE_URL" \
   --cookie-jar "$COOKIE_JAR" \
   --data "{\"password\":\"$PASSWORD\"}" \
   --output /dev/null --write-out '%{http_code}')"
