@@ -23,10 +23,22 @@ await context.tracing.start({ screenshots: true, snapshots: true, sources: true 
 const page = await context.newPage();
 const messages = [];
 const errors = [];
+let authenticationExpected = false;
+let unauthenticatedRefreshes = 0;
 page.on('console', (message) => messages.push(`${message.type()}: ${message.text()}`));
 page.on('pageerror', (error) => errors.push(`Uncaught: ${error.message}`));
 page.on('requestfailed', (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
 page.on('response', (response) => {
+  const request = response.request();
+  // Each phase starts with a fresh browser context and no HttpOnly auth cookies.
+  // The JWT client probes for a renewable session before showing setup/login.
+  // Allow only this initial rejection; refresh failures after login remain errors.
+  if (!authenticationExpected && response.status() === 401 &&
+      request.method() === 'POST' && response.url() === `${baseURL}/api/v1/auth/refresh`) {
+    unauthenticatedRefreshes++;
+    messages.push(`Expected unauthenticated refresh: ${response.url()}`);
+    return;
+  }
   if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`);
 });
 
@@ -43,6 +55,7 @@ try {
   } else {
     await expect(page.getByText('欢迎回到我们的小厨房', { exact: true })).toBeVisible();
     await page.getByRole('textbox').fill(process.env.CI_PASSWORD || 'ci-password-1234');
+    authenticationExpected = true;
     await Promise.all([
       page.waitForResponse((response) => response.url().endsWith('/api/v1/profile') && response.ok()),
       page.getByRole('button', { name: '进入小厨房', exact: true }).click(),
@@ -56,6 +69,7 @@ try {
     }
   }
   await page.screenshot({ path: resolve(artifacts, `${phase}.png`) });
+  expect(unauthenticatedRefreshes, 'At most one refresh probe before login').toBeLessThanOrEqual(1);
   expect(errors, 'Browser errors and failed resources').toEqual([]);
   console.log(`Web ${phase} verified; screenshot saved to ${artifacts}`);
 } catch (error) {
