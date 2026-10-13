@@ -57,7 +57,11 @@ try {
     await page.getByRole('textbox').fill(process.env.CI_PASSWORD || 'ci-password-1234');
     authenticationExpected = true;
     await Promise.all([
-      page.waitForResponse((response) => response.url().endsWith('/api/v1/profile') && response.ok()),
+      // Login is the deterministic boundary of this interaction. The home
+      // page starts its entries/recipes/profile requests concurrently after
+      // login, so waiting for one of those requests makes the smoke test
+      // sensitive to harmless loading order and service-worker timing.
+      page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/login') && response.ok()),
       page.getByRole('button', { name: '进入小厨房', exact: true }).click(),
     ]);
     await expect(page.getByText('今天也要好好吃饭呀～')).toBeVisible();
