@@ -1,5 +1,5 @@
 name: fooddiary
-description: 和你一起，把平凡的日子做成好吃的样子。
+description: 做饭日记
 publish_to: none
 version: 2.0.0+2
 environment:

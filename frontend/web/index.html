@@ -4,7 +4,6 @@
   <base href="$FLUTTER_BASE_HREF">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="FoodDiary 做饭日记：和你一起，把平凡的日子做成好吃的样子。">
   <meta name="theme-color" content="#fffaf3">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -15,14 +14,13 @@
   <title>做饭日记 · FoodDiary</title>
   <style>
     html,body { margin:0; height:100%; background:#fffaf3; }
-    #loading { height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px; font-family:system-ui,sans-serif; color:#493020; }
-    #loading img { width:100%; height:100%; object-fit:cover; }
+    #loading { height:100%; }
     #update { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:100; background:#493020; color:white; padding:12px 18px; border-radius:16px; font-family:system-ui,sans-serif; font-size:13px; display:none; }
     #update button { background:#ffbe4c; border:0; border-radius:8px; padding:6px 12px; margin-left:12px; cursor:pointer; }
   </style>
 </head>
 <body>
-  <div id="loading" role="status"><img src="assets/assets/images/opening-page.png" alt="做饭日记开屏"></div>
+  <div id="loading" role="status"></div>
   <div id="update">小厨房有新版本啦<button id="reload">刷新</button></div>
   <script src="flutter_bootstrap.js" async></script>
 </body>

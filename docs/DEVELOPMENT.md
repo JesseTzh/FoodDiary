@@ -89,7 +89,7 @@ API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON�
 
 ## Android
 
-`com.jessetzh.fooddiary`，主清单声明网络权限，相机和相册通过 image_picker 接入。正式包使用 HTTPS；debug/profile 可使用 HTTP 开发服务器。服务地址通过 `--dart-define=API_BASE_URL=...` 设置，用户也可在登录页或设置页修改。
+`com.jessetzh.fooddiary`，主清单声明网络权限，相机和相册通过 image_picker 接入。正式包使用 HTTPS；debug/profile 可使用 HTTP 开发服务器。服务地址通过 `--dart-define=API_BASE_URL=...` 设置。
 
 构建命令请使用 README 中的 `make apk` / `make appbundle`。正式签名读取 `android/key.properties`，文件和 keystore 均被忽略。无配置时使用开发签名。
 

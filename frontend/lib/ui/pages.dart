@@ -106,7 +106,7 @@ class _WelcomePageState extends State<WelcomePage> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(50),
-                  child: Image.asset('assets/images/mascot.png', width: 180),
+                  child: Image.asset('assets/images/logo.png', width: 180),
                 ),
                 const SizedBox(height: 26),
                 const Text(
@@ -118,11 +118,6 @@ class _WelcomePageState extends State<WelcomePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  '和你一起，把平凡的日子\n做成好吃的样子 ♥',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: muted, height: 1.9),
-                ),
                 const SizedBox(height: 36),
                 if (widget.loading)
                   const CircularProgressIndicator(color: gold)
@@ -148,7 +143,6 @@ class _WelcomePageState extends State<WelcomePage> {
                   TextField(
                     controller: password,
                     obscureText: obscure,
-                    maxLength: 128,
                     onSubmitted: (_) => submit(),
                     decoration: InputDecoration(
                       hintText: widget.setup ? '设置密码（至少 6 位）' : '输入厨房密码',
@@ -162,6 +156,14 @@ class _WelcomePageState extends State<WelcomePage> {
                           size: 19,
                         ),
                       ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: const BorderSide(color: line),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: const BorderSide(color: line),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -174,29 +176,7 @@ class _WelcomePageState extends State<WelcomePage> {
                     onPressed: busy ? null : submit,
                   ),
                 ],
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () async {
-                    final value = await serverDialog(context, widget.api.base);
-                    if (value != null) {
-                      try {
-                        await widget.api.setServer(value);
-                        await widget.onAuthenticated();
-                      } catch (e) {
-                        if (context.mounted) toast(context, e);
-                      }
-                    }
-                  },
-                  child: const Text(
-                    '设置服务地址',
-                    style: TextStyle(color: muted, fontSize: 12),
-                  ),
-                ),
                 const SizedBox(height: 24),
-                const Text(
-                  '一餐一饭，都值得被记住。',
-                  style: TextStyle(color: muted, fontSize: 12),
-                ),
               ],
             ),
           ),
@@ -206,46 +186,7 @@ class _WelcomePageState extends State<WelcomePage> {
   );
 }
 
-Future<String?> serverDialog(BuildContext context, String value) async {
-  final controller = TextEditingController(text: value);
-  final result = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('连接小厨房'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            '填写后端地址。安卓模拟器使用 http://10.0.2.2:8080，真机使用服务器的 HTTPS 地址。',
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: controller,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              hintText: 'https://your-kitchen.example',
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, controller.text),
-          child: const Text('连接'),
-        ),
-      ],
-    ),
-  );
-  // The dialog route can still animate while its text field is disposing.
-  await Future<void>.delayed(const Duration(milliseconds: 250));
-  controller.dispose();
-  return result;
-}
+
 
 class RecordPage extends StatefulWidget {
   final Api api;
@@ -1348,35 +1289,6 @@ class _SettingsPageState extends State<SettingsPage> {
           onPressed: busy || widget.offline ? null : save,
         ),
         const SizedBox(height: 30),
-        CozyCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              label('连接的小厨房'),
-              SelectableText(
-                widget.api.base,
-                style: const TextStyle(color: muted, fontSize: 12),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () async {
-                  final value = await serverDialog(context, widget.api.base);
-                  if (value != null) {
-                    try {
-                      await widget.api.setServer(value);
-                      widget.onLogout();
-                      if (context.mounted) Navigator.pop(context);
-                    } catch (e) {
-                      if (context.mounted) toast(context, e);
-                    }
-                  }
-                },
-                child: const Text('更换服务地址'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 18),
         const CozyCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1384,7 +1296,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Text('做饭日记 2.0', style: TextStyle(fontWeight: FontWeight.w700)),
               SizedBox(height: 8),
               Text(
-                '和你一起，把平凡的日子做成好吃的样子。\n离线时可浏览已缓存的日记与菜谱。',
+                '离线时可浏览已缓存的日记与菜谱。',
                 style: TextStyle(color: muted, fontSize: 12),
               ),
             ],

@@ -10,10 +10,6 @@ on:
         description: '已有的发布标签，例如 v2.0.0'
         required: true
         type: string
-      api_base_url:
-        description: '默认后端 HTTPS 地址；留空使用仓库变量 API_BASE_URL'
-        required: false
-        type: string
 
 concurrency:
   group: android-release-${{ github.event.inputs.release_tag || github.ref_name }}
@@ -29,7 +25,7 @@ jobs:
     timeout-minutes: 40
     env:
       RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
-      API_BASE_URL: ${{ github.event.inputs.api_base_url || vars.API_BASE_URL }}
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
 
     steps:
       - name: Checkout release tag
@@ -153,7 +149,7 @@ jobs:
           else
             printf '%s\n' 'Android APK 使用开发签名，适合安装预览。正式签名可通过仓库 ANDROID_* Secrets 配置。' > release-notes.md
           fi
-          printf '\n%s\n' '可在登录页「设置服务地址」连接你的 HTTPS 后端。SHA-256 校验文件随 APK 一并提供。' >> release-notes.md
+          printf '\n%s\n' 'SHA-256 校验文件随 APK 一并提供。' >> release-notes.md
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

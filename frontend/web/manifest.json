@@ -5,7 +5,6 @@
   "display": "standalone",
   "background_color": "#fffaf3",
   "theme_color": "#fffaf3",
-  "description": "和你一起，把平凡的日子做成好吃的样子。",
   "prefer_related_applications": false,
   "icons": [
     {

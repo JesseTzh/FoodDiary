@@ -44,9 +44,7 @@ class _OpeningPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xFFFFFAF3),
-    body: SizedBox.expand(
-      child: Image.asset('assets/images/opening-page.png', fit: BoxFit.cover),
-    ),
+    body: const Center(child: CircularProgressIndicator(color: gold)),
   );
 }
 
@@ -242,11 +240,6 @@ class _KitchenState extends State<Kitchen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    const Text(
-                      '和你一起，把平凡的日子\n做成好吃的样子 ♥',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: muted, fontSize: 12),
-                    ),
                     const SizedBox(height: 40),
                     for (var i = 0; i < 4; i++)
                       Padding(
@@ -267,10 +260,6 @@ class _KitchenState extends State<Kitchen> {
                         ),
                       ),
                     const Spacer(),
-                    const Text(
-                      '好好吃饭，就是最好的浪漫。',
-                      style: TextStyle(fontSize: 11, color: muted),
-                    ),
                     const SizedBox(height: 12),
                   ],
                 ),
@@ -433,7 +422,7 @@ class _KitchenState extends State<Kitchen> {
                             ),
                             SizedBox(height: 12),
                             Text(
-                              '一餐一饭，和你一起慢慢记录。',
+                              '记录每一餐喜欢的味道。',
                               style: TextStyle(fontSize: 12, color: muted),
                             ),
                           ],
@@ -522,7 +511,7 @@ class _KitchenState extends State<Kitchen> {
         const SizedBox(height: 24),
         const Center(
           child: Text(
-            '一餐一饭，都是生活的小确幸 ♡',
+            '把每次下厨都留下来。',
             style: TextStyle(color: muted, fontSize: 12),
           ),
         ),
@@ -952,7 +941,7 @@ class _KitchenState extends State<Kitchen> {
               child: Padding(
                 padding: EdgeInsets.all(20),
                 child: Text(
-                  '好好吃饭\n就是最好的浪漫 ♥',
+                  '把喜欢的味道记下来',
                   style: TextStyle(
                     fontSize: 15,
                     height: 2,

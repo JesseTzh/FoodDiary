@@ -21,11 +21,9 @@ class Api {
   int _tokenGeneration = 0;
   Future<void> init() async {
     prefs = await SharedPreferences.getInstance();
-    base =
-        prefs.getString('server') ??
-        (configuredBase.isNotEmpty
-            ? configuredBase
-            : (kIsWeb ? Uri.base.origin : 'http://10.0.2.2:8080'));
+    base = configuredBase.isNotEmpty
+        ? configuredBase
+        : (kIsWeb ? Uri.base.origin : 'http://10.0.2.2:8080');
     // Legacy plaintext credentials are intentionally invalidated by the upgrade.
     await prefs.remove('session');
     if (!kIsWeb) {
@@ -183,21 +181,6 @@ class Api {
     if (!kIsWeb) {
       await secureStorage.delete(key: 'auth_tokens');
     }
-  }
-
-  Future<void> setServer(String value) async {
-    if (_refreshing != null) await _refreshing;
-    final uri = Uri.tryParse(value.trim());
-    if (uri == null ||
-        !['https', 'http'].contains(uri.scheme) ||
-        uri.host.isEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment) {
-      throw Exception('请输入完整的 http 或 https 服务地址');
-    }
-    base = value.trim().replaceAll(RegExp(r'/+$'), '');
-    await prefs.setString('server', base);
-    await _clearTokens();
   }
 
   Future<void> logout() async {
