@@ -27,7 +27,22 @@ let authenticationExpected = false;
 let unauthenticatedRefreshes = 0;
 page.on('console', (message) => messages.push(`${message.type()}: ${message.text()}`));
 page.on('pageerror', (error) => errors.push(`Uncaught: ${error.message}`));
-page.on('requestfailed', (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
+page.on('requestfailed', (request) => {
+  const reason = request.failure()?.errorText || 'unknown request failure';
+  // Flutter tears down the auth-status request when its first frame switches
+  // from the loading screen to setup/login. Chromium reports that normal
+  // lifecycle cancellation as ERR_ABORTED; it is not a failed startup.
+  const url = new URL(request.url());
+  const expectedAuthProbeCancellation =
+    reason === 'net::ERR_ABORTED' &&
+    request.method() === 'GET' &&
+    url.pathname === '/api/v1/auth/status';
+  if (expectedAuthProbeCancellation) {
+    messages.push(`Expected request cancellation: ${request.url()}`);
+    return;
+  }
+  errors.push(`${request.url()}: ${reason}`);
+});
 page.on('response', (response) => {
   const request = response.request();
   // Each phase starts with a fresh browser context and no HttpOnly auth cookies.
