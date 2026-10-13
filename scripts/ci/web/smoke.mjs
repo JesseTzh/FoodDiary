@@ -78,15 +78,16 @@ async function authenticate() {
   await page.getByRole('textbox').fill(password);
   authenticationStarted = true;
   await page.getByRole('button', { name: '进入小厨房', exact: true }).click();
-  // The authenticated business view is the stable browser contract. A
-  // particular response event is an implementation detail of startup order.
-  await expect(page.getByText('今天也要好好吃饭呀～')).toBeVisible();
+  // Flutter may merge text into a parent's aria-label instead of DOM text.
+  // Assert an authenticated home action through its accessible role/name.
+  await expect(page.getByRole('button', { name: '记录今天的做饭', exact: true })).toBeVisible();
 }
 
 async function assertPersistedEntry() {
   const title = process.env.CI_ENTRY_TITLE;
   if (!title) throw new Error('CI_ENTRY_TITLE is required after restart');
-  const entry = page.getByText(title).first();
+  // Diary cards expose their combined content as a button's accessible name.
+  const entry = page.getByRole('button', { name: title }).first();
   await entry.scrollIntoViewIfNeeded();
   await expect(entry).toBeVisible();
 }
