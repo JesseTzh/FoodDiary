@@ -1,5 +1,16 @@
 import 'package:flutter/material.dart';
 
+/// Stable cross-platform hook for UI automation.
+class TestId extends StatelessWidget {
+  final String value;
+  final Widget child;
+  const TestId(this.value, {required this.child, super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      Semantics(identifier: value, child: child);
+}
+
 const cream = Color(0xFFFFFAF3);
 const paper = Color(0xFFFFFDF9);
 const ink = Color(0xFF493020);
@@ -85,11 +96,13 @@ class PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
+  final String? semanticIdentifier;
   const PrimaryButton(
     this.label, {
     super.key,
     required this.onPressed,
     this.icon,
+    this.semanticIdentifier,
   });
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -103,18 +116,21 @@ class PrimaryButton extends StatelessWidget {
     ),
     child: SizedBox(
       height: 50,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(foregroundColor: ink),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 20),
-              const SizedBox(width: 8),
+      child: Semantics(
+        identifier: semanticIdentifier,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(foregroundColor: ink),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 20),
+                const SizedBox(width: 8),
+              ],
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
             ],
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-          ],
+          ),
         ),
       ),
     ),

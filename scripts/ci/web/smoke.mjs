@@ -68,26 +68,21 @@ async function startApplication() {
 }
 
 async function assertFirstRun() {
-  await expect(page.getByText('给我们的小厨房设一个密码', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox')).toBeVisible();
-  await expect(page.getByRole('button', { name: '开启做饭日记', exact: true })).toBeVisible();
+  await expect(page.locator('[flt-semantics-identifier="first-run-password-prompt"]')).toBeVisible();
+  await expect(page.locator('[flt-semantics-identifier="setup-password-input"]')).toBeVisible();
+  await expect(page.locator('[flt-semantics-identifier="setup-submit"]')).toBeVisible();
 }
 
 async function authenticate() {
-  await expect(page.getByText('欢迎回到我们的小厨房', { exact: true })).toBeVisible();
-  await page.getByRole('textbox').fill(password);
+  await expect(page.locator('[flt-semantics-identifier="login-password-prompt"]')).toBeVisible();
+  await page.locator('[flt-semantics-identifier="login-password-input"]').fill(password);
   authenticationStarted = true;
-  await page.getByRole('button', { name: '进入小厨房', exact: true }).click();
-  // Flutter may merge text into a parent's aria-label instead of DOM text.
-  // Assert an authenticated home action through its accessible role/name.
-  await expect(page.getByRole('button', { name: '记录今天的做饭', exact: true })).toBeVisible();
+  await page.locator('[flt-semantics-identifier="login-submit"]').click();
+  await expect(page.locator('[flt-semantics-identifier="home-record-action"]')).toBeVisible();
 }
 
 async function assertPersistedEntry() {
-  const title = process.env.CI_ENTRY_TITLE;
-  if (!title) throw new Error('CI_ENTRY_TITLE is required after restart');
-  // Diary cards expose their combined content as a button's accessible name.
-  const entry = page.getByRole('button', { name: title }).first();
+  const entry = page.locator('[flt-semantics-identifier="diary-entry"]').first();
   await entry.scrollIntoViewIfNeeded();
   await expect(entry).toBeVisible();
 }

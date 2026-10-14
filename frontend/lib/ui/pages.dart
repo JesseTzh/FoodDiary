@@ -135,34 +135,44 @@ class _WelcomePageState extends State<WelcomePage> {
                   const SizedBox(height: 20),
                   PrimaryButton('重新连接', onPressed: widget.onAuthenticated),
                 ] else ...[
-                  Text(
-                    widget.setup ? '给我们的小厨房设一个密码' : '欢迎回到我们的小厨房',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  TestId(
+                    widget.setup
+                        ? 'first-run-password-prompt'
+                        : 'login-password-prompt',
+                    child: Text(
+                      widget.setup ? '给我们的小厨房设一个密码' : '欢迎回到我们的小厨房',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
                   const SizedBox(height: 18),
-                  TextField(
-                    controller: password,
-                    obscureText: obscure,
-                    onSubmitted: (_) => submit(),
-                    decoration: InputDecoration(
-                      hintText: widget.setup ? '设置密码（至少 6 位）' : '输入厨房密码',
-                      prefixIcon: const Icon(Icons.lock_outline, size: 20),
-                      suffixIcon: IconButton(
-                        onPressed: () => setState(() => obscure = !obscure),
-                        icon: Icon(
-                          obscure
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          size: 19,
+                  TestId(
+                    widget.setup
+                        ? 'setup-password-input'
+                        : 'login-password-input',
+                    child: TextField(
+                      controller: password,
+                      obscureText: obscure,
+                      onSubmitted: (_) => submit(),
+                      decoration: InputDecoration(
+                        hintText: widget.setup ? '设置密码（至少 6 位）' : '输入厨房密码',
+                        prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(() => obscure = !obscure),
+                          icon: Icon(
+                            obscure
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            size: 19,
+                          ),
                         ),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: const BorderSide(color: line),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: const BorderSide(color: line),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(28),
+                          borderSide: const BorderSide(color: line),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(28),
+                          borderSide: const BorderSide(color: line),
+                        ),
                       ),
                     ),
                   ),
@@ -173,6 +183,9 @@ class _WelcomePageState extends State<WelcomePage> {
                         : widget.setup
                         ? '开启做饭日记'
                         : '进入小厨房',
+                    semanticIdentifier: widget.setup
+                        ? 'setup-submit'
+                        : 'login-submit',
                     onPressed: busy ? null : submit,
                   ),
                 ],
@@ -185,8 +198,6 @@ class _WelcomePageState extends State<WelcomePage> {
     ),
   );
 }
-
-
 
 class RecordPage extends StatefulWidget {
   final Api api;

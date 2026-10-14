@@ -468,6 +468,7 @@ class _KitchenState extends State<Kitchen> {
               PrimaryButton(
                 '记录今天的做饭',
                 icon: Icons.add,
+                semanticIdentifier: 'home-record-action',
                 onPressed: offline ? null : record,
               ),
             ],
@@ -635,68 +636,74 @@ class _KitchenState extends State<Kitchen> {
     );
   }
 
-  Widget entryCard(Diary e) => InkWell(
-    borderRadius: BorderRadius.circular(20),
-    onTap: () => open(DiaryPage(api: api, entry: e, offline: offline)),
-    child: CozyCard(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DishPhoto(
-            api: api,
-            path: e.photos.isEmpty ? null : e.photos.first,
-            width: 100,
-            height: 112,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${int.parse(e.date.substring(5, 7))}月${int.parse(e.date.substring(8))}日    ${e.meal}',
-                  style: const TextStyle(color: muted, fontSize: 11),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  e.title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  e.notes.isEmpty ? '今天也认真做饭了～' : e.notes,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: muted),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text(
-                      moods[e.mood.clamp(0, 4)],
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      '美味日常',
-                      style: TextStyle(color: Color(0xFFD6A77A), fontSize: 10),
-                    ),
-                    const Spacer(),
-                    Icon(
-                      e.favorite ? Icons.favorite : Icons.favorite_border,
-                      color: const Color(0xFFFF9184),
-                      size: 16,
-                    ),
-                  ],
-                ),
-              ],
+  Widget entryCard(Diary e) => TestId(
+    'diary-entry',
+    child: InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => open(DiaryPage(api: api, entry: e, offline: offline)),
+      child: CozyCard(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DishPhoto(
+              api: api,
+              path: e.photos.isEmpty ? null : e.photos.first,
+              width: 100,
+              height: 112,
             ),
-          ),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${int.parse(e.date.substring(5, 7))}月${int.parse(e.date.substring(8))}日    ${e.meal}',
+                    style: const TextStyle(color: muted, fontSize: 11),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    e.title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    e.notes.isEmpty ? '今天也认真做饭了～' : e.notes,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: muted),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        moods[e.mood.clamp(0, 4)],
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      const SizedBox(width: 6),
+                      const Text(
+                        '美味日常',
+                        style: TextStyle(
+                          color: Color(0xFFD6A77A),
+                          fontSize: 10,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(
+                        e.favorite ? Icons.favorite : Icons.favorite_border,
+                        color: const Color(0xFFFF9184),
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
