@@ -3,11 +3,16 @@ name: Pipeline
 on:
   push:
     branches:
-      - main
+      - '**'
     tags:
-      - "v*"
+      - '**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '可选：构建并发布已有标签；留空使用当前分支'
+        required: false
+        type: string
 
 concurrency:
   group: pipeline-${{ github.ref }}
@@ -21,12 +26,51 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Resolve build revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+      release-tag: ${{ steps.revision.outputs.release-tag }}
+      publish-pages: ${{ steps.revision.outputs.publish-pages }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve and validate revision
+        id: revision
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          RELEASE_TAG="ci-$SHA"
+          if [[ -n "$REQUESTED_TAG" ]]; then
+            git check-ref-format "refs/tags/$REQUESTED_TAG"
+            SHA="$(git rev-parse --verify "refs/tags/$REQUESTED_TAG^{commit}")"
+            RELEASE_TAG="$REQUESTED_TAG"
+          elif [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"
+          fi
+          PUBLISH_PAGES=false
+          if [[ "$GITHUB_EVENT_NAME" != pull_request && "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" && -z "$REQUESTED_TAG" ]]; then
+            PUBLISH_PAGES=true
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "release-tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "publish-pages=$PUBLISH_PAGES" >> "$GITHUB_OUTPUT"
+
   backend-check:
     name: Go tests and vet
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -35,11 +79,14 @@ jobs:
       - run: go test ./...
 
   frontend-check:
-    name: Flutter analyze
+    name: Flutter analyze and tests
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.7'
@@ -49,13 +96,18 @@ jobs:
         working-directory: frontend
       - run: flutter analyze
         working-directory: frontend
+      - run: flutter test
+        working-directory: frontend
 
   web-smoke:
     name: Production image and Web startup
+    needs: [prepare, backend-check, frontend-check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: docker/setup-buildx-action@v4
       - name: Build and load production image
         uses: docker/build-push-action@v7
@@ -94,59 +146,90 @@ jobs:
           retention-days: 14
 
   android:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    name: Build Android APK
+    name: Build and verify Android APK
+    needs: [prepare, frontend-check]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
+    env:
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-java@v6
         with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v6
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.7'
-          channel: stable
-          cache: true
-      - name: Build APK
-        working-directory: frontend
-        env:
-          API_BASE_URL: ${{ vars.API_BASE_URL }}
-        run: flutter build apk --release --dart-define=API_BASE_URL="${API_BASE_URL:-https://fooddiary.example.com}"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: fooddiary-android
-          path: frontend/build/app/outputs/flutter-apk/app-release.apk
-          compression-level: 0
-          retention-days: 14
+          ref: ${{ needs.prepare.outputs.sha }}
 
-  android-startup:
-    name: Verify APK startup on Android emulator
-    needs: android
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Free disk space for Android emulator
+      # Leave room for Gradle, the APK, and the emulator system image.
+      - name: Free disk space for Android build and emulator
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/share/boost /opt/ghc /usr/local/.ghcup
           df -h /
 
-      - name: Download APK
-        uses: actions/download-artifact@v8
+      - name: Set up Java
+        uses: actions/setup-java@v6
         with:
-          name: fooddiary-android
-          path: android-apk
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: Configure Android signing
+        if: github.event_name != 'pull_request'
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          keys = ['KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD']
+          values = [os.environ.get(key, '') for key in keys]
+          if any(values) and not all(values):
+              raise SystemExit('请完整配置四个 ANDROID 签名 Secrets，或全部留空使用开发签名。')
+          mode = 'development'
+          if all(values):
+              keystore = Path(os.environ['RUNNER_TEMP']) / 'fooddiary-release.jks'
+              keystore.write_bytes(base64.b64decode(values[0], validate=True))
+              keystore.chmod(0o600)
+              def escape(value):
+                  return value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('=', '\\=').replace(':', '\\:').replace(' ', '\\ ')
+              props = {'storeFile': str(keystore), 'storePassword': values[1], 'keyAlias': values[2], 'keyPassword': values[3]}
+              config = Path('frontend/android/key.properties')
+              config.write_text(''.join(f'{key}={escape(value)}\n' for key, value in props.items()), encoding='utf-8')
+              config.chmod(0o600)
+              mode = 'release'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'mode={mode}\n')
+          PY
+
+      - name: Build APK
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_ARGS=(--release --build-number="$GITHUB_RUN_NUMBER")
+          if [[ -n "$API_BASE_URL" ]]; then
+            [[ "$API_BASE_URL" == https://* ]] || { echo '发布包默认服务地址必须使用 HTTPS'; exit 1; }
+            BUILD_ARGS+=(--dart-define="API_BASE_URL=$API_BASE_URL")
+          fi
+          flutter build apk "${BUILD_ARGS[@]}"
 
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
 
-      - name: Install and launch APK
+      - name: Verify release APK startup
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -155,7 +238,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: bash scripts/ci/verify-android-startup.sh android-apk/app-release.apk
+          script: bash scripts/ci/verify-android-startup.sh frontend/build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload startup screenshot and diagnostics
         if: always()
@@ -166,24 +249,147 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Prepare release files
+        shell: bash
+        env:
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          APK_NAME="fooddiary-$(git rev-parse --short=12 HEAD)-android.apk"
+          cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/$APK_NAME"
+          cd release-artifacts
+          sha256sum "$APK_NAME" > "$APK_NAME.sha256"
+          if [[ "$SIGNING_MODE" == release ]]; then
+            printf '%s\n' 'Android APK 使用仓库配置的正式密钥签名。' > release-notes.md
+          else
+            printf '%s\n' 'Android APK 使用开发签名，适合安装预览。正式签名可通过仓库 ANDROID_* Secrets 配置。' > release-notes.md
+          fi
+          printf '\n%s\n' 'SHA-256 校验文件随 APK 一并提供。' >> release-notes.md
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: fooddiary-release-android
+          compression-level: 0
+          retention-days: 14
+          path: |
+            release-artifacts/*.apk
+            release-artifacts/*.sha256
+            release-artifacts/release-notes.md
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f frontend/android/key.properties "$RUNNER_TEMP/fooddiary-release.jks"
+
   mock-screenshots:
-    name: Mock screenshots of all pages
-    needs: android
+    name: Capture every mock page (mobile and desktop)
+    needs: [prepare, frontend-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Build isolated mock frontend
+        run: bash scripts/build-web.sh --dart-define=MOCK_API=true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/ci/web/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: scripts/ci/web
+        run: npm ci
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-chromium-${{ hashFiles('scripts/ci/web/package-lock.json') }}
+      - name: Install Chromium and system dependencies
+        working-directory: scripts/ci/web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Capture all pages using mock data
+        run: bash scripts/ci/verify-mock-pages.sh
+      - name: Upload gallery for GitHub Pages
+        if: needs.prepare.outputs.publish-pages == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: mock-page-artifacts/site
+      - name: Upload screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fooddiary-mock-pages
+          path: mock-page-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Publish Android Release
+    if: github.event_name != 'pull_request'
+    needs: [prepare, web-smoke, android, mock-screenshots]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.release-tag }}
+    steps:
+      - name: Download verified APK and checksums
+        uses: actions/download-artifact@v8
+        with:
+          name: fooddiary-release-android
+          path: release-artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
+          prerelease: ${{ startsWith(env.RELEASE_TAG, 'ci-') }}
+          make_latest: ${{ startsWith(env.RELEASE_TAG, 'ci-') && 'false' || 'true' }}
+          body_path: release-artifacts/release-notes.md
+          append_body: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/*.apk
+            release-artifacts/*.sha256
+
+  deploy-gallery:
+    name: Publish mock gallery to GitHub Pages
+    needs: [prepare, web-smoke, android, mock-screenshots]
+    if: needs.prepare.outputs.publish-pages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
       pages: write
       id-token: write
-    uses: ./.github/workflows/mock-screenshots.yml
-    with:
-      publish-pages: ${{ github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    concurrency:
+      group: fooddiary-mock-gallery-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy screenshot gallery
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Link gallery in workflow summary
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: echo "### [浏览双端截图与界面功能说明]($PAGE_URL)" >> "$GITHUB_STEP_SUMMARY"
 
   build-and-push:
     name: Build and push Docker image
-    if: github.event_name != 'pull_request'
-    needs:
-      - backend-check
-      - frontend-check
-      - web-smoke
+    if: github.event_name != 'pull_request' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')) && !inputs.release_tag
+    needs: [prepare, web-smoke, android, mock-screenshots]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
@@ -192,6 +398,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up QEMU for arm64
         uses: docker/setup-qemu-action@v4
@@ -231,14 +439,16 @@ jobs:
 
   deploy:
     name: Deploy to server
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build-and-push
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event_name != 'pull_request' && !inputs.release_tag
+    needs: [prepare, build-and-push]
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Run remote deploy script
         env:

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -58,8 +57,9 @@ DateTime? _jpegExifDate(Uint8List bytes) {
 DateTime? _readExifTiff(Uint8List bytes, int start, int end) {
   if (start + 8 > end) return null;
   final little = bytes[start] == 0x49 && bytes[start + 1] == 0x49;
-  if (!little && !(bytes[start] == 0x4d && bytes[start + 1] == 0x4d))
+  if (!little && !(bytes[start] == 0x4d && bytes[start + 1] == 0x4d)) {
     return null;
+  }
   int u16(int p) =>
       little ? bytes[p] | bytes[p + 1] << 8 : bytes[p] << 8 | bytes[p + 1];
   int u32(int p) => little
@@ -431,7 +431,7 @@ class _RecordPageState extends State<RecordPage> {
         }
         suggestedDate ??= imageDateFromBytes(data);
       }
-      if (suggestedDate != null && !_sameDay(suggestedDate!, date) && mounted) {
+      if (suggestedDate != null && !_sameDay(suggestedDate, date) && mounted) {
         final useImageDate = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(

@@ -27,6 +27,9 @@ const page = await context.newPage();
 const messages = [];
 const errors = [];
 const loginAborts = [];
+const dataAborts = [];
+const dataResponses = new Map();
+const homeDataPaths = new Set(['/api/v1/entries', '/api/v1/recipes', '/api/v1/profile']);
 let successfulLoginRequest;
 let authenticationStarted = false;
 let unauthenticatedRefreshes = 0;
@@ -59,9 +62,20 @@ function installDiagnostics() {
       messages.push(`Login response cancellation: ${request.url()}`);
       return;
     }
+    // Chromium can report cancellation after Flutter has consumed a fetch
+    // body. Keep these candidates until the fresh, online home has rendered
+    // and the exact request's successful response headers have been checked.
+    if (reason === 'net::ERR_ABORTED' && request.method() === 'GET' &&
+        url.origin === new URL(baseURL).origin && homeDataPaths.has(url.pathname)) {
+      dataAborts.push(request);
+      return;
+    }
     errors.push(`${request.url()}: ${reason}`);
   });
   page.on('response', (response) => {
+    if (homeDataPaths.has(new URL(response.url()).pathname)) {
+      dataResponses.set(response.request(), response);
+    }
     if (isInitialRefresh(response)) {
       unauthenticatedRefreshes++;
       messages.push(`Expected unauthenticated refresh: ${response.url()}`);
@@ -124,6 +138,10 @@ async function authenticate() {
     throw new Error(`Login request failed with HTTP ${loginResponse.status()}`);
   }
   await expect(page.locator('[flt-semantics-identifier="home-record-action"]')).toBeVisible();
+  // Each phase starts with an empty browser context. Rendering this online
+  // home therefore proves Flutter consumed all three JSON bodies, rather than
+  // displaying a cached snapshot after a real network failure.
+  await expect(page.getByText('离线浏览 · 显示上次保存的内容', { exact: true })).toHaveCount(0);
   successfulLoginRequest = loginResponse.request();
 }
 
@@ -131,6 +149,9 @@ async function assertPersistedEntry() {
   const entry = page.locator('[flt-semantics-identifier="diary-entry"]').first();
   await entry.scrollIntoViewIfNeeded();
   await expect(entry).toBeVisible();
+  if (process.env.CI_ENTRY_TITLE) {
+    await expect(entry).toContainText(process.env.CI_ENTRY_TITLE);
+  }
 }
 
 async function saveEvidence() {
@@ -141,6 +162,13 @@ async function saveEvidence() {
   for (const request of loginAborts) {
     if (request !== successfulLoginRequest) {
       errors.push(`${request.url()}: net::ERR_ABORTED`);
+    }
+  }
+  for (const request of dataAborts) {
+    if (!successfulLoginRequest || !dataResponses.get(request)?.ok()) {
+      errors.push(`${request.url()}: net::ERR_ABORTED`);
+    } else {
+      messages.push(`Consumed home response cancellation: ${request.url()}`);
     }
   }
   expect(errors, 'Browser errors and failed resources').toEqual([]);
