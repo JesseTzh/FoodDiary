@@ -107,7 +107,7 @@ func (a *App) saveRecipe(w http.ResponseWriter, r *http.Request) {
 	}
 	x.ID = id()
 	x.Custom = true
-	x.Image = "tomato"
+	x.Image = ""
 	ij, _ := json.Marshal(x.Ingredients)
 	sj, _ := json.Marshal(x.Steps)
 	if _, e := a.db.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,?,?,?,?,?,?,'')", x.ID, x.Title, x.Category, x.Description, x.Image, ij, sj, x.Favorite, x.Custom); e != nil {

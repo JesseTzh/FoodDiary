@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	neturl "net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -464,5 +465,47 @@ func TestCORSDisabledByDefault(t *testing.T) {
 	resp.Body.Close()
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("CORS must stay off by default, got ACAO %q", got)
+	}
+}
+
+func TestRemovePresetRecipesUpgrade(t *testing.T) {
+	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "upgrade.db")+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	previous := t.TempDir()
+	paths, err := filepath.Glob("../../migrations/*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if filepath.Base(path) == "000008_remove_preset_recipes.up.sql" {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(previous, filepath.Base(path)), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := loadMigrations(db, previous); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,custom) VALUES('personal','番茄炒蛋','家常菜','','tomato','[]','[]',1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadMigrations(db, "../../migrations"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM recipes").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected only personal recipe: %d, %v", count, err)
+	}
+	var image string
+	if err := db.QueryRow("SELECT image FROM recipes WHERE id='personal'").Scan(&image); err != nil || image != "" {
+		t.Fatalf("personal recipe missing or old image retained: %q, %v", image, err)
 	}
 }

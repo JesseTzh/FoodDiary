@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'data/api.dart';
 import 'data/models.dart';
 import 'ui/theme.dart';
+import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
 
 void main() {
@@ -55,7 +57,34 @@ class Kitchen extends StatefulWidget {
   State<Kitchen> createState() => _KitchenState();
 }
 
-class _KitchenState extends State<Kitchen> {
+class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
+  Timer? _dayTimer;
+
+  void _scheduleDayChange() {
+    _dayTimer?.cancel();
+    final now = DateTime.now();
+    final midnight = DateTime(now.year, now.month, now.day + 1);
+    _dayTimer = Timer(midnight.difference(now), () {
+      if (mounted) setState(() {});
+      _scheduleDayChange();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      setState(() {});
+      _scheduleDayChange();
+    }
+  }
+
+  @override
+  void dispose() {
+    _dayTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   int tab = 0;
   bool loading = true, authenticated = false, setup = false, offline = false;
   String? error;
@@ -67,6 +96,8 @@ class _KitchenState extends State<Kitchen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleDayChange();
     refresh();
   }
 
@@ -226,7 +257,7 @@ class _KitchenState extends State<Kitchen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(40),
                       child: Image.asset(
-                        'assets/images/mascot.png',
+                        'assets/images/app-logo.png',
                         width: 165,
                       ),
                     ),
@@ -376,72 +407,15 @@ class _KitchenState extends State<Kitchen> {
                 ),
               ],
             ),
-            const Spacer(),
-            InkWell(
-              onTap: () => setState(() => tab = 3),
-              child: ClipOval(
-                child: Image.asset(
-                  'assets/images/mascot.png',
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
           ],
         ),
         const SizedBox(height: 22),
         ClipRRect(
           borderRadius: BorderRadius.circular(24),
-          child: LayoutBuilder(
-            builder: (context, c) {
-              if (c.maxWidth <= 600) {
-                return Image.asset(
-                  'assets/images/hero.png',
-                  width: c.maxWidth,
-                  height: c.maxWidth * .39,
-                  fit: BoxFit.cover,
-                );
-              }
-              return Container(
-                height: 220,
-                color: const Color(0xFFFFEFD7),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.all(28),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '把日子过成\n喜欢的味道',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                                height: 1.6,
-                              ),
-                            ),
-                            SizedBox(height: 12),
-                            Text(
-                              '记录每一餐喜欢的味道。',
-                              style: TextStyle(fontSize: 12, color: muted),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Image.asset(
-                      'assets/images/hero.png',
-                      width: c.maxWidth * .58,
-                      height: 220,
-                      fit: BoxFit.contain,
-                    ),
-                  ],
-                ),
-              );
-            },
+          child: Image.asset(
+            dailyHeroAsset(today),
+            width: double.infinity,
+            fit: BoxFit.fitWidth,
           ),
         ),
         const SizedBox(height: 22),
@@ -590,19 +564,12 @@ class _KitchenState extends State<Kitchen> {
     photo ??= recipe.photos.isEmpty ? null : recipe.photos.last as Map;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: photo == null
-          ? Image.asset(
-              'assets/images/${recipe.image}.png',
-              width: width,
-              height: height,
-              fit: BoxFit.cover,
-            )
-          : DishPhoto(
-              api: api,
-              path: photo['url'] as String,
-              width: width,
-              height: height ?? 220,
-            ),
+      child: DishPhoto(
+        api: api,
+        path: photo?['url'] as String?,
+        width: width,
+        height: height ?? 220,
+      ),
     );
   }
 

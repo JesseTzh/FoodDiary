@@ -116,7 +116,7 @@ class _WelcomePageState extends State<WelcomePage> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(50),
-                  child: Image.asset('assets/images/logo.png', width: 180),
+                  child: Image.asset('assets/images/app-logo.png', width: 180),
                 ),
                 const SizedBox(height: 26),
                 const Text(
@@ -1039,14 +1039,10 @@ class _RecipePageState extends State<RecipePage> {
               height: 260,
             )
           else
-            ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: Image.asset(
-                'assets/images/${r.image}.png',
-                height: 260,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
+            DishPhoto(
+              api: widget.api,
+              path: photos.isEmpty ? null : photos.last['url'] as String,
+              height: 260,
             ),
           const SizedBox(height: 24),
           Text(
@@ -1301,14 +1297,13 @@ class CollectionPage extends StatelessWidget {
             child: CozyCard(
               padding: EdgeInsets.zero,
               child: ListTile(
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.asset(
-                    'assets/images/${r.image}.png',
-                    width: 56,
-                    height: 56,
-                    fit: BoxFit.cover,
-                  ),
+                leading: DishPhoto(
+                  api: api,
+                  path: r.photos.isEmpty
+                      ? null
+                      : r.photos.last['url'] as String,
+                  width: 56,
+                  height: 56,
                 ),
                 title: Text(r.title),
                 subtitle: Text(r.category),

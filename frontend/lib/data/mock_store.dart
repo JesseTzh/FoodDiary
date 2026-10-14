@@ -13,6 +13,26 @@ class MockStore {
   MockStore(this.prefs) {
     final saved = prefs.getString(storageKey);
     state = jsonDecode(saved ?? jsonEncode(_seed()));
+    // Upgrade existing mock sessions without discarding user-created data.
+    if (state['seed_version'] != 2) {
+      recipes.removeWhere(
+        (r) =>
+            r['custom'] == false &&
+            const ['tomato', 'chicken', 'greens', 'noodles'].contains(r['id']),
+      );
+      for (final entry in entries) {
+        (entry['media'] as List?)?.removeWhere(
+          (m) => const [
+            'asset:assets/images/tomato.png',
+            'asset:assets/images/chicken.png',
+            'asset:assets/images/greens.png',
+            'asset:assets/images/noodles.png',
+          ].contains(m['url']),
+        );
+      }
+      state['seed_version'] = 2;
+      prefs.setString(storageKey, jsonEncode(state));
+    }
   }
   List<dynamic> get entries => state['entries'];
   List<dynamic> get recipes => state['recipes'];
@@ -114,7 +134,7 @@ class MockStore {
             'title': dish['title'],
             'category': data['category'] ?? '家常菜',
             'description': '',
-            'image': 'tomato',
+            'image': '',
             'ingredients': [],
             'steps': [],
             'favorite': false,
@@ -171,7 +191,7 @@ class MockStore {
         ...data,
         'id': _id(),
         'custom': true,
-        'image': 'tomato',
+        'image': '',
         'favorite': false,
       };
       recipes.insert(0, result);
@@ -249,56 +269,12 @@ class MockStore {
     await _save();
   }
 
-  Map<String, dynamic> _seed() {
-    final today = DateTime.now();
-    final dishes = [
-      ['tomato', '番茄炒蛋', '家常菜', '番茄 2 个', '鸡蛋 3 个'],
-      ['chicken', '宫保鸡丁', '肉类', '鸡胸肉 250g', '花生 50g'],
-      ['greens', '清炒时蔬', '素菜', '青菜 300g', '蒜 2 瓣'],
-      ['noodles', '酸辣土豆丝', '家常菜', '土豆 2 个', '辣椒 1 个'],
-    ];
-    return {
-      'next_id': 100,
-      'authenticated': true,
-      'profile': {'name': '小虎和小鼠', 'bio': '一起做饭，一起变好 ♥'},
-      'entries': List.generate(
-        3,
-        (i) => {
-          'id': 'entry-$i',
-          'title': dishes[i][1],
-          'cooked_on': today
-              .subtract(Duration(days: i * 20))
-              .toIso8601String()
-              .substring(0, 10),
-          'meal': '晚餐',
-          'category': dishes[i][2],
-          'notes': '今天也认真做饭了，留下这份美味的回忆。',
-          'tags': [dishes[i][2], '晚餐'],
-          'mood': i,
-          'version': 1,
-          'favorite': i == 0,
-          'media': [
-            {'url': 'asset:assets/images/${dishes[i][0]}.png'},
-          ],
-        },
-      ),
-      'recipes': dishes
-          .map(
-            (d) => {
-              'id': d[0],
-              'image': d[0],
-              'title': d[1],
-              'category': d[2],
-              'description': '简单好做的家常味道。',
-              'ingredients': [d[3], d[4], '盐适量'],
-              'steps': ['洗净食材，切好备用。', '热锅下油，加入食材翻炒。', '调味后装盘，趁热享用。'],
-              'favorite': d[0] == 'tomato',
-              'custom': false,
-              'photos': <dynamic>[],
-              'cover_media_id': '',
-            },
-          )
-          .toList(),
-    };
-  }
+  Map<String, dynamic> _seed() => {
+    'seed_version': 2,
+    'next_id': 100,
+    'authenticated': true,
+    'profile': {'name': '小虎和小鼠', 'bio': '一起做饭，一起变好 ♥'},
+    'entries': <dynamic>[],
+    'recipes': <dynamic>[],
+  };
 }

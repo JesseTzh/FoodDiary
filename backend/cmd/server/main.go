@@ -610,7 +610,7 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 			}
 			if d.ID == "" && tx.QueryRow("SELECT id FROM recipes WHERE title=? COLLATE NOCASE", d.Title).Scan(&d.ID) != nil {
 				d.ID = id()
-				_, e = tx.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,'','tomato','[]','[]',0,1,'')", d.ID, d.Title, x.Category)
+				_, e = tx.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,'','','[]','[]',0,1,'')", d.ID, d.Title, x.Category)
 			}
 			if e != nil {
 				break

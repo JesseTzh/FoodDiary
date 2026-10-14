@@ -25,6 +25,28 @@ try {
     });
     context.setDefaultTimeout(30_000);
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    // Screenshot fixtures belong to this test, not the application's initial data.
+    await context.addInitScript(() => {
+      const key = 'flutter.fooddiary:mock:v1';
+      if (localStorage.getItem(key)) return;
+      const state = {
+        seed_version: 2, next_id: 100, authenticated: true,
+        profile: { name: '小虎和小鼠', bio: '一起做饭，一起变好 ♥' },
+        entries: [{
+          id: 'ci-entry', title: '番茄炒蛋', cooked_on: '2026-10-14',
+          meal: '晚餐', category: '家常菜', notes: '截图测试记录',
+          tags: ['家常菜'], mood: 0, version: 1, favorite: false, media: [],
+          dishes: [{ id: 'ci-recipe', title: '番茄炒蛋' }],
+        }],
+        recipes: [{
+          id: 'ci-recipe', title: '番茄炒蛋', category: '家常菜',
+          description: '截图测试菜谱', image: '', ingredients: ['番茄', '鸡蛋'],
+          steps: ['翻炒后装盘'], favorite: true, custom: true,
+          photos: [], cover_media_id: '',
+        }],
+      };
+      localStorage.setItem(key, JSON.stringify(JSON.stringify(state)));
+    });
     const page = await context.newPage();
     const logs = [], errors = [], captured = [];
     let current = 'startup';
@@ -94,7 +116,7 @@ try {
       await capture('mine', text('我的收藏'));
       for (const [name, label, ready] of [
         ['favorites', '我的收藏', '番茄炒蛋'],
-        ['my-recipes', '我的菜谱', '把喜欢的美味，慢慢收集起来吧 ♡'],
+        ['my-recipes', '我的菜谱', '番茄炒蛋'],
       ]) {
         await click(text(label));
         await capture(name, page.getByText(ready, { exact: false }).first());

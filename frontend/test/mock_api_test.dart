@@ -5,6 +5,7 @@ import 'package:http/testing.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fooddiary/data/api.dart';
+import 'package:fooddiary/data/mock_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -21,11 +22,45 @@ void main() {
   }
 
   test(
+    'upgrading mock presets preserves personal recipes and diary records',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        MockStore.storageKey: jsonEncode({
+          'next_id': 101,
+          'authenticated': true,
+          'profile': {'name': '厨师', 'bio': ''},
+          'entries': [
+            {
+              'id': 'entry-0',
+              'media': [
+                {'url': 'asset:assets/images/tomato.png'},
+                {'url': 'data:image/png;base64,personal'},
+              ],
+            },
+          ],
+          'recipes': [
+            {'id': 'tomato', 'custom': false},
+            {'id': 'personal', 'custom': true},
+          ],
+        }),
+      });
+      final store = MockStore(await SharedPreferences.getInstance());
+      expect(store.recipes.single['id'], 'personal');
+      expect(store.entries.single['id'], 'entry-0');
+      expect(
+        store.entries.single['media'].single['url'],
+        'data:image/png;base64,personal',
+      );
+    },
+  );
+
+  test(
     'mock supports persistent CRUD, photos, favorites, recipes and profile',
     () async {
       final api = await mockApi();
       final initial = await api.request('GET', '/entries');
-      expect(initial['total'], 3);
+      expect(initial['total'], 0);
+      expect(await api.request('GET', '/recipes'), isEmpty);
       final body = {
         'title': '测试晚餐',
         'cooked_on': '2026-10-14',
@@ -81,7 +116,7 @@ void main() {
         'bio': '你好',
       });
       expect(profile['recipe_count'], 1);
-      expect(profile['favorite_count'], 2);
+      expect(profile['favorite_count'], 1);
       await api.request('DELETE', '/entries/$id');
       await expectLater(
         api.request('GET', '/entries/$id'),
