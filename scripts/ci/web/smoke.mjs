@@ -100,16 +100,26 @@ async function authenticate() {
   const input = semanticControl('login-password-input');
   await input.fill(password);
   authenticationStarted = true;
+  const isLoginResponse = (response) => response.request().method() === 'POST' &&
+    new URL(response.url()).pathname === '/api/v1/auth/login';
   // Submitting from the native control exercises Flutter's TextField
-  // onSubmitted callback directly. Clicking the semantics wrapper can be
-  // swallowed by the web semantics layer on some Flutter releases.
-  const login = page.waitForResponse(
-    (response) => response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/v1/auth/login',
-    { timeout },
-  );
-  await input.press('Enter');
-  const loginResponse = await login;
+  // onSubmitted callback directly. Some CanvasKit builds intermittently
+  // swallow that key event, so fall back to the semantics button quickly.
+  const submitAndWait = async (submit, waitTimeout) => {
+    const response = page.waitForResponse(isLoginResponse, { timeout: waitTimeout });
+    await submit();
+    return response;
+  };
+  let loginResponse;
+  try {
+    loginResponse = await submitAndWait(() => input.press('Enter'), 5_000);
+  } catch (error) {
+    if (error.name !== 'TimeoutError') throw error;
+    loginResponse = await submitAndWait(
+      () => page.locator('[flt-semantics-identifier="login-submit"]').click(),
+      timeout,
+    );
+  }
   if (!loginResponse.ok()) {
     throw new Error(`Login request failed with HTTP ${loginResponse.status()}`);
   }
