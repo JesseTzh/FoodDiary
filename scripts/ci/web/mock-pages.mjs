@@ -9,7 +9,7 @@ const browser = await chromium.launch({ headless: true });
 const requiredPages = [
   'home', 'record', 'diary', 'diary-detail', 'diary-edit', 'diary-delete',
   'cookbook', 'recipe-detail', 'recipe-record', 'recipe-new', 'mine',
-  'favorites', 'my-recipes', 'groceries', 'settings', 'login', 'setup',
+  'favorites', 'my-recipes', 'settings', 'login', 'setup',
 ];
 
 try {
@@ -95,12 +95,9 @@ try {
       for (const [name, label, ready] of [
         ['favorites', '我的收藏', '番茄炒蛋'],
         ['my-recipes', '我的菜谱', '把喜欢的美味，慢慢收集起来吧 ♡'],
-        ['groceries', '食材清单', '鸡蛋一盒'],
       ]) {
         await click(text(label));
-        await capture(name, name === 'groceries'
-          ? page.getByRole('checkbox', { name: /鸡蛋一盒/ })
-          : page.getByText(ready, { exact: false }).first());
+        await capture(name, page.getByText(ready, { exact: false }).first());
         await back(text('我的收藏'));
       }
       await click(text('设置'));

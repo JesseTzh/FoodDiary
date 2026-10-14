@@ -1,6 +1,6 @@
 # 做饭日记 · FoodDiary
 
-Flutter 3.47.7 / Dart 3.13 构建一套适配手机和桌面的界面；Web 使用 CanvasKit，支持安装为 PWA；Android 使用 Flutter 原生渲染。Go 1.26 + SQLite 后端负责密码登录、日记、照片、菜谱、收藏、个人资料和食材清单。
+Flutter 3.47.7 / Dart 3.13 构建一套适配手机和桌面的界面；Web 使用 CanvasKit，支持安装为 PWA；Android 使用 Flutter 原生渲染。Go 1.26 + SQLite 后端负责密码登录、日记、照片、菜谱、收藏和个人资料。
 
 ## 功能
 
@@ -81,7 +81,7 @@ Go 同时托管 API、照片和 Web 资源，生产建议同源 HTTPS 部署，P
 
 生产必须使用 HTTPS；反向代理应覆盖客户端传入的 `X-Forwarded-Proto` 并保留原始 Host。登录限速按直连 IP 计算，不信任外部 `X-Forwarded-For`，代理部署时同一代理后的用户共享限速。签名密钥自动持久化，备份时包含 `jwt.key`；多实例需使用相同密钥与数据库。配置新密钥后旧 JWT 失效，若要强制所有客户端重新登录，应同时撤销数据库会话。Web 使用 HttpOnly、SameSite=Lax Cookie，HTTPS 下标记 Secure；写请求校验 Origin（允许显式 CORS 白名单），App 使用安全存储并发送 `X-FoodDiary-Client: app`。不要将不可信来源加入 CORS 白名单。
 
-`data` 保存真实用户资料，重构不会删除现有数据库。新版以新界面和数据契约为准，不承诺旧客户端兼容。迁移 `000004_kitchen.up.sql` 增加新版业务字段、菜谱和食材清单。
+`data` 保存真实用户资料，重构不会删除现有数据库。新版以新界面和数据契约为准，不承诺旧客户端兼容。迁移 `000004_kitchen.up.sql` 增加新版业务字段和菜谱，`000006_remove_groceries.up.sql` 清理已移除的食材清单表。
 
 Pipeline 在 PR、main 推送、v* 标签推送和手动运行时执行 Go 单元测试与 vet、Flutter analyze、生产 Docker 镜像构建与 Web 冒烟测试。PR 和手动运行同时构建 Android APK；所有分支和标签推送的 APK 构建由 Android Release 负责。Web 不再在静态检查任务里重复构建；Docker 构建使用 GitHub Actions BuildKit 缓存，发布多架构镜像时复用已验证的 amd64 构建层。
 
@@ -91,9 +91,9 @@ Web 冒烟测试通过 Chromium 访问镜像实际提供的 CanvasKit 前端，�
 
 下载 Artifact `fooddiary-android-startup`（Android Release 中为 `fooddiary-release-android-startup`）可查看 `startup.png` 和启动、Activity、Logcat 日志，保留 14 天；失败时尝试保存 `failure.png`。Android 检查属于启动冒烟检查，登录与后端接口功能仍需单独测试。
 
-APK 构建成功后执行可复用工作流 `.github/workflows/mock-screenshots.yml`：使用 `MOCK_API=true` 构建独立 Web 前端，以 Playwright 分别在手机（390×844）和桌面（1440×1080）视口截图。覆盖首页、记录做饭、日记列表/详情/编辑/删除确认、菜谱列表/详情/从菜谱记录做饭/新建、我的、收藏、我的菜谱、食材清单、设置、登录和首次设置密码。推送时接在 Android Release 成功之后，PR 和 Pipeline 手动运行时接在 `android` 构建成功之后。正式 APK 不启用 mock。
+APK 构建成功后执行可复用工作流 `.github/workflows/mock-screenshots.yml`：使用 `MOCK_API=true` 构建独立 Web 前端，以 Playwright 分别在手机（390×844）和桌面（1440×1080）视口截图。覆盖首页、记录做饭、日记列表/详情/编辑/删除确认、菜谱列表/详情/从菜谱记录做饭/新建、我的、收藏、我的菜谱、设置、登录和首次设置密码。推送时接在 Android Release 成功之后，PR 和 Pipeline 手动运行时接在 `android` 构建成功之后。正式 APK 不启用 mock。
 
-下载 Artifact `fooddiary-mock-pages` 可查看两种布局各 17 张页面截图、语义快照、页面清单、浏览器日志和 Playwright trace，保留 14 天。脚本通过页面语义确认导航成功，任何真实后端请求都会失败；失败时保存当前页面截图及诊断。该流程检查页面可达性并提供人工视觉检查证据，不执行像素基线比较。本地可运行 `bash scripts/build-web.sh --dart-define=MOCK_API=true` 后执行 `bash scripts/ci/verify-mock-pages.sh`。
+下载 Artifact `fooddiary-mock-pages` 可查看两种布局各 16 张页面截图、语义快照、页面清单、浏览器日志和 Playwright trace，保留 14 天。脚本通过页面语义确认导航成功，任何真实后端请求都会失败；失败时保存当前页面截图及诊断。该流程检查页面可达性并提供人工视觉检查证据，不执行像素基线比较。本地可运行 `bash scripts/build-web.sh --dart-define=MOCK_API=true` 后执行 `bash scripts/ci/verify-mock-pages.sh`。
 
 详细接口和结构见 [开发说明](docs/DEVELOPMENT.md)。
 

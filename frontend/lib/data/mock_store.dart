@@ -16,7 +16,6 @@ class MockStore {
   }
   List<dynamic> get entries => state['entries'];
   List<dynamic> get recipes => state['recipes'];
-  List<dynamic> get groceries => state['groceries'];
   Future<void> _save() async {
     if (!await prefs.setString(storageKey, jsonEncode(state))) {
       throw ApiError(507, '本地模拟存储空间不足');
@@ -96,8 +95,38 @@ class MockStore {
       return _copy({'items': items, 'total': items.length});
     } else if (path == '/entries' && method == 'POST') {
       _entry(data);
+      final dishes = List<Map<String, dynamic>>.from(data['dishes'] ?? []);
+      for (final dish in dishes) {
+        Map? found;
+        for (final recipe in recipes) {
+          if (recipe['title'].toString().toLowerCase() ==
+              dish['title'].toString().toLowerCase()) {
+            found = recipe;
+            break;
+          }
+        }
+        if (found != null) {
+          dish['id'] = found['id'];
+        } else {
+          dish['id'] = _id();
+          recipes.insert(0, {
+            'id': dish['id'],
+            'title': dish['title'],
+            'category': data['category'] ?? '家常菜',
+            'description': '',
+            'image': 'tomato',
+            'ingredients': [],
+            'steps': [],
+            'favorite': false,
+            'custom': true,
+            'photos': <dynamic>[],
+            'cover_media_id': '',
+          });
+        }
+      }
       result = {
         ...data,
+        'dishes': dishes,
         'id': _id(),
         'version': 1,
         'favorite': data['favorite'] ?? false,
@@ -153,6 +182,13 @@ class MockStore {
       final recipe = _find(recipes, parts[1]);
       recipe['favorite'] = data['favorite'] == true;
       result = {'favorite': recipe['favorite']};
+    } else if (parts.length == 3 &&
+        parts[0] == 'recipes' &&
+        parts[2] == 'cover' &&
+        method == 'PATCH') {
+      final recipe = _find(recipes, parts[1]);
+      recipe['cover_media_id'] = data['media_id'];
+      result = {'cover_media_id': data['media_id']};
     } else if (path == '/profile' && (method == 'GET' || method == 'PATCH')) {
       if (method == 'PATCH') {
         _text(data['name'], 30);
@@ -167,22 +203,6 @@ class MockStore {
         'recipe_count': recipes.where((r) => r['custom'] == true).length,
         'favorite_count': recipes.where((r) => r['favorite'] == true).length,
       };
-    } else if (path == '/groceries' && method == 'GET') {
-      return _copy(groceries);
-    } else if (path == '/groceries' && method == 'POST') {
-      _text(data['name'], 80);
-      result = {'id': _id(), 'name': data['name'], 'checked': false};
-      groceries.insert(0, result);
-    } else if (parts.length == 2 &&
-        parts[0] == 'groceries' &&
-        (method == 'PATCH' || method == 'DELETE')) {
-      final item = _find(groceries, parts[1]);
-      if (method == 'DELETE') {
-        groceries.remove(item);
-      } else {
-        item['checked'] = data['checked'] == true;
-      }
-      result = method == 'DELETE' ? {'ok': true} : {'checked': item['checked']};
     } else {
       throw ApiError(404, '未实现的模拟接口：$method $path');
     }
@@ -190,7 +210,7 @@ class MockStore {
     return _copy(result);
   }
 
-  Future<void> upload(String id, XFile file) async {
+  Future<void> upload(String id, XFile file, {String? recipeId}) async {
     if (state['authenticated'] != true) throw ApiError(401, '请先登录');
     final media = _find(entries, id)['media'] as List;
     if (media.length >= 9) throw ApiError(400, '最多可以保存 9 张照片');
@@ -217,7 +237,15 @@ class MockStore {
     media.add({
       'id': _id(),
       'url': 'data:image/$type;base64,${base64Encode(bytes)}',
+      'recipe_id': recipeId,
     });
+    if (recipeId != null) {
+      final recipe = recipes.cast<Map>().firstWhere((r) => r['id'] == recipeId);
+      final recipePhotos = (recipe['photos'] as List? ?? <dynamic>[]);
+      recipePhotos.add(media.last);
+      recipe['photos'] = recipePhotos;
+      recipe['cover_media_id'] = media.last['id'];
+    }
     await _save();
   }
 
@@ -266,13 +294,11 @@ class MockStore {
               'steps': ['洗净食材，切好备用。', '热锅下油，加入食材翻炒。', '调味后装盘，趁热享用。'],
               'favorite': d[0] == 'tomato',
               'custom': false,
+              'photos': <dynamic>[],
+              'cover_media_id': '',
             },
           )
           .toList(),
-      'groceries': [
-        {'id': 'grocery-1', 'name': '鸡蛋一盒', 'checked': false},
-        {'id': 'grocery-2', 'name': '番茄 2 个', 'checked': true},
-      ],
     };
   }
 }

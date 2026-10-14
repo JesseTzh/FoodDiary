@@ -145,7 +145,7 @@ class _KitchenState extends State<Kitchen> {
       toast(context, '当前离线，联网后可以记录做饭');
       return;
     }
-    open(RecordPage(api: api, entry: entry));
+    open(RecordPage(api: api, entry: entry, recipes: recipes));
   }
 
   Future<void> favoriteRecipe(Recipe recipe) async {
@@ -530,15 +530,7 @@ class _KitchenState extends State<Kitchen> {
       padding: const EdgeInsets.all(10),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.asset(
-              'assets/images/${r.image}.png',
-              width: 94,
-              height: 94,
-              fit: BoxFit.cover,
-            ),
-          ),
+          recipeImage(r, width: 94, height: 94, radius: 16),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -581,6 +573,39 @@ class _KitchenState extends State<Kitchen> {
       ),
     ),
   );
+
+  Widget recipeImage(
+    Recipe recipe, {
+    required double width,
+    double? height,
+    double radius = 14,
+  }) {
+    Map? photo;
+    for (final item in recipe.photos) {
+      if (item['id'] == recipe.coverMediaId) {
+        photo = item as Map;
+        break;
+      }
+    }
+    photo ??= recipe.photos.isEmpty ? null : recipe.photos.last as Map;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: photo == null
+          ? Image.asset(
+              'assets/images/${recipe.image}.png',
+              width: width,
+              height: height,
+              fit: BoxFit.cover,
+            )
+          : DishPhoto(
+              api: api,
+              path: photo['url'] as String,
+              width: width,
+              height: height ?? 220,
+            ),
+    );
+  }
+
   Widget diary() {
     final months = entries.map((e) => e.date.substring(0, 7)).toSet().toList();
     final filtered = entries
@@ -781,13 +806,10 @@ class _KitchenState extends State<Kitchen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: Image.asset(
-                              'assets/images/${r.image}.png',
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
+                          child: recipeImage(
+                            r,
+                            width: double.infinity,
+                            radius: 14,
                           ),
                         ),
                         Padding(
@@ -919,11 +941,6 @@ class _KitchenState extends State<Kitchen> {
                   title: '我的菜谱',
                 ),
               ),
-            ),
-            menu(
-              Icons.shopping_bag_outlined,
-              '食材清单',
-              () => open(GroceriesPage(api: api, offline: offline)),
             ),
             menu(
               Icons.settings_outlined,

@@ -153,14 +153,18 @@ class Api {
     return value['data'];
   }
 
-  Future<void> upload(String id, XFile file) async {
-    if (mock) return _mockStore!.upload(id, file);
+  Future<void> upload(String id, XFile file, {String? recipeId}) async {
+    if (mock) return _mockStore!.upload(id, file, recipeId: recipeId);
     await _ensureAccess();
     final bytes = await file.readAsBytes();
     Future<http.Response> send() async {
       final req = http.MultipartRequest(
         'POST',
-        Uri.parse(url('/api/v1/entries/$id/media')),
+        Uri.parse(
+          url(
+            '/api/v1/entries/$id/media${recipeId == null ? '' : '?recipe_id=$recipeId'}',
+          ),
+        ),
       );
       if (!kIsWeb) {
         req.headers['X-FoodDiary-Client'] = 'app';

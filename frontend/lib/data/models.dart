@@ -3,6 +3,7 @@ class Diary {
   final List<String> tags, photos;
   final int mood, version;
   final bool favorite;
+  final List<Map<String, String>> dishes;
   Diary(Map<String, dynamic> j)
     : id = j['id'],
       title = j['title'],
@@ -16,7 +17,12 @@ class Diary {
           .toList(),
       mood = j['mood'] ?? 0,
       version = j['version'] ?? 1,
-      favorite = j['favorite'] ?? false;
+      favorite = j['favorite'] ?? false,
+      dishes = (j['dishes'] as List? ?? [])
+          .map(
+            (d) => {'id': '${d['id'] ?? ''}', 'title': '${d['title'] ?? ''}'},
+          )
+          .toList();
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
@@ -28,6 +34,7 @@ class Diary {
     'mood': mood,
     'version': version,
     'favorite': favorite,
+    'dishes': dishes,
   };
 }
 
@@ -35,6 +42,8 @@ class Recipe {
   final String id, title, category, description, image;
   final List<String> ingredients, steps;
   final bool favorite, custom;
+  final String? coverMediaId;
+  final List<dynamic> photos;
   Recipe(Map<String, dynamic> j)
     : id = j['id'],
       title = j['title'],
@@ -44,7 +53,9 @@ class Recipe {
       ingredients = List<String>.from(j['ingredients'] ?? []),
       steps = List<String>.from(j['steps'] ?? []),
       favorite = j['favorite'],
-      custom = j['custom'];
+      custom = j['custom'],
+      coverMediaId = j['cover_media_id'],
+      photos = List<dynamic>.from(j['photos'] ?? []);
 }
 
 const moods = ['😋', '🥰', '😊', '🤩', '😣'];

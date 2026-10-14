@@ -20,74 +20,107 @@ void main() {
     return api;
   }
 
-  test('mock supports persistent CRUD, photos, favorites, recipes, profile and groceries', () async {
+  test(
+    'mock supports persistent CRUD, photos, favorites, recipes and profile',
+    () async {
+      final api = await mockApi();
+      final initial = await api.request('GET', '/entries');
+      expect(initial['total'], 3);
+      final body = {
+        'title': '测试晚餐',
+        'cooked_on': '2026-10-14',
+        'notes': '',
+        'mood': 0,
+        'tags': ['晚餐'],
+      };
+      final entry = await api.request('POST', '/entries', body);
+      final id = entry['id'];
+      final edited = await api.request('PATCH', '/entries/$id', {
+        ...body,
+        'title': '修改晚餐',
+        'version': 1,
+      });
+      expect(edited['version'], 2);
+      await expectLater(
+        api.request('PATCH', '/entries/$id', {...body, 'version': 1}),
+        throwsA(isA<ApiError>().having((e) => e.status, 'status', 409)),
+      );
+      await api.upload(
+        id,
+        XFile.fromData(
+          base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+          ),
+          name: 'photo.png',
+        ),
+      );
+      await api.request('PATCH', '/entries/$id/favorite', {'favorite': true});
+      final reloaded = await mockApi();
+      final detail = await reloaded.request('GET', '/entries/$id');
+      expect(
+        detail['media'].single['url'],
+        startsWith('data:image/png;base64,'),
+      );
+      expect(detail['favorite'], true);
+      expect(
+        (await api.request('GET', '/entries?q=修改&favorite=true'))['total'],
+        1,
+      );
+      final recipe = await api.request('POST', '/recipes', {
+        'title': '自制汤',
+        'category': '汤类',
+        'description': '',
+        'ingredients': ['水'],
+        'steps': ['煮开'],
+      });
+      await api.request('PATCH', '/recipes/${recipe['id']}/favorite', {
+        'favorite': true,
+      });
+      final profile = await api.request('PATCH', '/profile', {
+        'name': '测试厨师',
+        'bio': '你好',
+      });
+      expect(profile['recipe_count'], 1);
+      expect(profile['favorite_count'], 2);
+      await api.request('DELETE', '/entries/$id');
+      await expectLater(
+        api.request('GET', '/entries/$id'),
+        throwsA(isA<ApiError>().having((e) => e.status, 'status', 404)),
+      );
+    },
+  );
+  test('a diary can contain multiple reusable dishes with recipe photos and a selected cover', () async {
     final api = await mockApi();
-    final initial = await api.request('GET', '/entries');
-    expect(initial['total'], 3);
-    final body = {
-      'title': '测试晚餐',
+    final entry = await api.request('POST', '/entries', {
+      'title': '番茄炒蛋',
       'cooked_on': '2026-10-14',
       'notes': '',
       'mood': 0,
-      'tags': ['晚餐'],
-    };
-    final entry = await api.request('POST', '/entries', body);
-    final id = entry['id'];
-    final edited = await api.request('PATCH', '/entries/$id', {
-      ...body,
-      'title': '修改晚餐',
-      'version': 1,
+      'tags': [],
+      'dishes': [
+        {'title': '番茄炒蛋'},
+        {'title': '清炒时蔬'},
+      ],
     });
-    expect(edited['version'], 2);
-    await expectLater(
-      api.request('PATCH', '/entries/$id', {...body, 'version': 1}),
-      throwsA(isA<ApiError>().having((e) => e.status, 'status', 409)),
-    );
-    await api.upload(
-      id,
-      XFile.fromData(
-        base64Decode(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
-        ),
-        name: 'photo.png',
+    expect((entry['dishes'] as List).length, 2);
+    final recipes = await api.request('GET', '/recipes') as List;
+    final tomato = recipes.firstWhere((r) => r['title'] == '番茄炒蛋');
+    final photo = XFile.fromData(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
       ),
+      name: 'dish.png',
     );
-    await api.request('PATCH', '/entries/$id/favorite', {'favorite': true});
-    final reloaded = await mockApi();
-    final detail = await reloaded.request('GET', '/entries/$id');
-    expect(detail['media'].single['url'], startsWith('data:image/png;base64,'));
-    expect(detail['favorite'], true);
-    expect(
-      (await api.request('GET', '/entries?q=修改&favorite=true'))['total'],
-      1,
-    );
-    final recipe = await api.request('POST', '/recipes', {
-      'title': '自制汤',
-      'category': '汤类',
-      'description': '',
-      'ingredients': ['水'],
-      'steps': ['煮开'],
+    await api.upload(entry['id'], photo, recipeId: tomato['id']);
+    final updatedRecipes = await api.request('GET', '/recipes') as List;
+    final updated = updatedRecipes.firstWhere((r) => r['id'] == tomato['id']);
+    expect((updated['photos'] as List).length, 1);
+    await api.request('PATCH', '/recipes/${tomato['id']}/cover', {
+      'media_id': updated['photos'][0]['id'],
     });
-    await api.request('PATCH', '/recipes/${recipe['id']}/favorite', {
-      'favorite': true,
-    });
-    final profile = await api.request('PATCH', '/profile', {
-      'name': '测试厨师',
-      'bio': '你好',
-    });
-    expect(profile['recipe_count'], 1);
-    expect(profile['favorite_count'], 2);
-    final grocery = await api.request('POST', '/groceries', {'name': '豆腐'});
-    await api.request('PATCH', '/groceries/${grocery['id']}', {
-      'checked': true,
-    });
-    expect((await api.request('GET', '/groceries')).first['checked'], true);
-    await api.request('DELETE', '/groceries/${grocery['id']}');
-    await api.request('DELETE', '/entries/$id');
-    await expectLater(
-      api.request('GET', '/entries/$id'),
-      throwsA(isA<ApiError>().having((e) => e.status, 'status', 404)),
-    );
+    final afterCover = (await api.request('GET', '/recipes') as List)
+        .firstWhere((r) => r['id'] == tomato['id']);
+    expect(afterCover['cover_media_id'], updated['photos'][0]['id']);
   });
   test(
     'mock logout and login remain isolated from production credentials',

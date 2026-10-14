@@ -17,7 +17,7 @@ frontend/
   android/                      原生工程与可选正式签名
 backend/
   cmd/server/main.go            登录、日记 CRUD、照片、路由与启动
-  cmd/server/kitchen.go         菜谱、收藏、个人资料、食材清单
+  cmd/server/kitchen.go         菜谱、收藏、个人资料
   migrations/                   SQLite 迁移
 scripts/build-web.sh             发布构建入口
 scripts/build-pwa.py             根据实际构建资源生成版本化离线缓存
@@ -46,10 +46,6 @@ scripts/build-pwa.py             根据实际构建资源生成版本化离线�
 | PATCH | `/recipes/{id}/favorite` | 收藏或取消收藏 |
 | GET | `/profile` | 昵称、简介、记录数、创建菜谱数、收藏数 |
 | PATCH | `/profile` | 更新 name / bio |
-| GET | `/groceries` | 食材清单 |
-| POST | `/groceries` | `{ "name": "鸡蛋一盒" }` |
-| PATCH | `/groceries/{id}` | `{ "checked": true }` |
-| DELETE | `/groceries/{id}` | 删除食材 |
 
 以上业务接口均需要登录。访问令牌为 HS256 JWT（`golang-jwt/jwt/v5 v5.3.1`），有效 15 分钟，严格验证算法、签名、issuer、audience、subject、exp、iat、nbf、jti 和 sid，且每次检查数据库会话是否仍有效。Web 会话固定 7 天、Android 固定 30 天；刷新不延长期限。每次登录创建独立会话，支持多端同时在线，单端退出或刷新令牌重放只撤销该端的会话；配置密码不变时重启保留会话，密码真正变化时原子地更新密码并撤销所有端的会话。刷新令牌为 32 字节随机值，数据库只保存 SHA-256 哈希；原令牌轮换后保留消费记录，重放会撤销整个会话，退出同样即时撤销访问 JWT。
 
@@ -85,7 +81,7 @@ Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在�
 
 API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON。应用在成功加载三组业务数据后，把快照保存到 SharedPreferences（Web 为浏览器本地存储）；断网时可读取快照。照片采用网络优先、离线缓存回退，最多缓存 100 张；退出登录清理照片缓存和当前服务器快照。未访问照片离线可能不可见。
 
-离线模式仅支持浏览日记和菜谱，不支持新增、编辑、收藏或食材清单；应用启动、手动刷新及「重试」会重新连接。
+离线模式仅支持浏览日记和菜谱，不支持新增、编辑或收藏；应用启动、手动刷新及「重试」会重新连接。
 
 ## Android
 

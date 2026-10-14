@@ -46,15 +46,21 @@ type Entry struct {
 	UpdatedAt   string           `json:"updated_at"`
 	Version     int              `json:"version"`
 	Media       []Media          `json:"media,omitempty"`
+	Dishes      []Dish           `json:"dishes,omitempty"`
 	// 游客浏览：true 表示该记录开放给未登录的游客查看
 	SharedWithGuests bool `json:"shared_with_guests"`
 }
+type Dish struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
 type Media struct {
-	ID      string `json:"id"`
-	EntryID string `json:"entry_id"`
-	Mime    string `json:"mime"`
-	Size    int64  `json:"size_bytes"`
-	URL     string `json:"url"`
+	ID       string `json:"id"`
+	EntryID  string `json:"entry_id"`
+	Mime     string `json:"mime"`
+	Size     int64  `json:"size_bytes"`
+	URL      string `json:"url"`
+	RecipeID string `json:"recipe_id,omitempty"`
 }
 type App struct {
 	db      *sql.DB
@@ -347,6 +353,7 @@ func (a *App) entries(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal([]byte(sj), &x.Steps)
 		x.Tags = a.tags(x.ID)
 		x.Media = a.media(x.ID)
+		x.Dishes = a.entryDishes(x.ID, x.Title)
 		out = append(out, x)
 	}
 	writeJSON(w, 200, map[string]any{"items": out, "total": len(out)})
@@ -369,7 +376,7 @@ func (a *App) tags(entry string) []string {
 	return o
 }
 func (a *App) media(entry string) []Media {
-	rows, _ := a.db.Query("SELECT id,entry_id,mime,size_bytes FROM media_assets WHERE entry_id=? ORDER BY created_at", entry)
+	rows, _ := a.db.Query("SELECT id,entry_id,mime,size_bytes,COALESCE(recipe_id,'') FROM media_assets WHERE entry_id=? ORDER BY created_at", entry)
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -379,12 +386,26 @@ func (a *App) media(entry string) []Media {
 	if rows != nil {
 		for rows.Next() {
 			var m Media
-			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size)
+			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size, &m.RecipeID)
 			m.URL = "/media/assets/" + m.ID + "/original"
 			o = append(o, m)
 		}
 	}
 	return o
+}
+func (a *App) entryDishes(entry, fallback string) []Dish {
+	var raw string
+	if a.db.QueryRow("SELECT dishes_json FROM diary_entries WHERE id=?", entry).Scan(&raw) == nil {
+		var dishes []Dish
+		if json.Unmarshal([]byte(raw), &dishes) == nil && len(dishes) > 0 {
+			return dishes
+		}
+	}
+	var dish Dish
+	if a.db.QueryRow("SELECT id,title FROM recipes WHERE title=? COLLATE NOCASE", fallback).Scan(&dish.ID, &dish.Title) == nil {
+		return []Dish{dish}
+	}
+	return []Dish{{Title: fallback}}
 }
 func (a *App) get(w http.ResponseWriter, r *http.Request) {
 	var x Entry
@@ -400,6 +421,7 @@ func (a *App) get(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal([]byte(sj), &x.Steps)
 	x.Tags = a.tags(id)
 	x.Media = a.media(id)
+	x.Dishes = a.entryDishes(id, x.Title)
 	writeJSON(w, 200, x)
 }
 
@@ -464,6 +486,7 @@ func (a *App) guestGet(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal([]byte(sj), &x.Steps)
 	x.Tags = a.tags(id)
 	x.Media = a.media(id)
+	x.Dishes = a.entryDishes(id, x.Title)
 	writeJSON(w, 200, x)
 }
 func valid(x Entry) error {
@@ -518,6 +541,21 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 	if x.Ingredients == nil {
 		x.Ingredients = []map[string]any{}
 	}
+	if len(x.Dishes) == 0 {
+		x.Dishes = []Dish{{Title: x.Title}}
+	}
+	if len(x.Dishes) > 20 {
+		errJSON(w, 400, "VALIDATION_ERROR", "一篇日记最多添加 20 道菜")
+		return
+	}
+	for i := range x.Dishes {
+		x.Dishes[i].Title = strings.TrimSpace(x.Dishes[i].Title)
+		if x.Dishes[i].Title == "" || utf8.RuneCountInString(x.Dishes[i].Title) > 80 {
+			errJSON(w, 400, "VALIDATION_ERROR", "菜名需为 1 到 80 个字")
+			return
+		}
+	}
+	x.Title = x.Dishes[0].Title
 	if x.Steps == nil {
 		x.Steps = []string{}
 	}
@@ -560,6 +598,30 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 		_, e = tx.Exec("INSERT INTO diary_entries(id,cooked_on,title,category,duration_minutes,difficulty,rating,ingredients_json,steps_json,notes,created_at,updated_at,version,meal,mood,favorite) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", x.ID, x.CookedOn, x.Title, x.Category, x.Duration, x.Difficulty, x.Rating, ij, sj, x.Notes, x.CreatedAt, x.UpdatedAt, x.Version, x.Meal, x.Mood, x.Favorite)
 	}
 	if e == nil {
+		for i := range x.Dishes {
+			d := &x.Dishes[i]
+			if d.ID != "" {
+				var title string
+				if tx.QueryRow("SELECT title FROM recipes WHERE id=?", d.ID).Scan(&title) == nil {
+					d.Title = title
+				} else {
+					d.ID = ""
+				}
+			}
+			if d.ID == "" && tx.QueryRow("SELECT id FROM recipes WHERE title=? COLLATE NOCASE", d.Title).Scan(&d.ID) != nil {
+				d.ID = id()
+				_, e = tx.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,'','tomato','[]','[]',0,1,'')", d.ID, d.Title, x.Category)
+			}
+			if e != nil {
+				break
+			}
+		}
+	}
+	dishesJSON, _ := json.Marshal(x.Dishes)
+	if e == nil {
+		_, e = tx.Exec("UPDATE diary_entries SET dishes_json=? WHERE id=?", dishesJSON, x.ID)
+	}
+	if e == nil {
 		for _, t := range x.Tags {
 			if _, e = tx.Exec("INSERT OR IGNORE INTO entry_tags(entry_id,tag) VALUES(?,?)", x.ID, t); e != nil {
 				break
@@ -577,6 +639,7 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 		return
 	}
 	x.Media = a.media(x.ID)
+	x.Dishes = a.entryDishes(x.ID, x.Title)
 	status := 201
 	if editing {
 		status = 200
@@ -648,6 +711,7 @@ func (a *App) stats(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	entry := chi.URLParam(r, "id")
+	recipe := strings.TrimSpace(r.URL.Query().Get("recipe_id"))
 	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
 	if e := r.ParseMultipartForm(2 << 20); e != nil {
 		errJSON(w, 400, "VALIDATION_ERROR", "单张照片不能超过 20 MB")
@@ -681,6 +745,26 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 404, "NOT_FOUND", "entry not found")
 		return
 	}
+	if recipe != "" {
+		var raw string
+		if e = tx.QueryRow("SELECT dishes_json FROM diary_entries WHERE id=?", entry).Scan(&raw); e != nil {
+			errJSON(w, 500, "DB", e.Error())
+			return
+		}
+		var dishes []Dish
+		json.Unmarshal([]byte(raw), &dishes)
+		found := false
+		for _, d := range dishes {
+			if d.ID == recipe {
+				found = true
+				break
+			}
+		}
+		if !found {
+			errJSON(w, 400, "VALIDATION_ERROR", "该菜谱不属于这篇日记")
+			return
+		}
+	}
 	if e = tx.QueryRow("SELECT count(*) FROM media_assets WHERE entry_id=?", entry).Scan(&count); e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
@@ -700,7 +784,10 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, "MEDIA", e.Error())
 		return
 	}
-	_, e = tx.Exec("INSERT INTO media_assets(id,entry_id,original_name,mime,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?)", mid, entry, h.Filename, mime, len(raw), hex.EncodeToString(sum[:]), now())
+	_, e = tx.Exec("INSERT INTO media_assets(id,entry_id,recipe_id,original_name,mime,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)", mid, entry, nullableString(recipe), h.Filename, mime, len(raw), hex.EncodeToString(sum[:]), now())
+	if e == nil && recipe != "" {
+		_, e = tx.Exec("UPDATE recipes SET cover_media_id=? WHERE id=?", mid, recipe)
+	}
 	if e == nil {
 		e = tx.Commit()
 	}
@@ -709,7 +796,13 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	writeJSON(w, 201, Media{ID: mid, EntryID: entry, Mime: mime, Size: int64(len(raw)), URL: "/media/assets/" + mid + "/original"})
+	writeJSON(w, 201, Media{ID: mid, EntryID: entry, RecipeID: recipe, Mime: mime, Size: int64(len(raw)), URL: "/media/assets/" + mid + "/original"})
+}
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // 已开放给游客的记录，其照片允许未登录访问；其余仍要求有效会话。

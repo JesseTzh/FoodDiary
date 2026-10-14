@@ -20,7 +20,7 @@ flutter run -d chrome --web-port=5173 --dart-define=MOCK_API=true
 flutter run --dart-define=MOCK_API=true
 ```
 
-Mock 默认进入已登录状态，提供跨月份日记、照片、菜谱、收藏与食材清单。支持日记新增/编辑/删除、照片上传预览、收藏、创建菜谱、清单增删勾选和个人资料修改；修改会保存至本地，刷新/重启后保留。退出后使用密码 `mock123456` 登录。版本冲突、未登录、记录不存在和主要输入约束也会返回模拟错误。
+Mock 默认进入已登录状态，提供跨月份日记、照片、菜谱和收藏。支持日记新增/编辑/删除、照片上传预览、收藏、创建菜谱和个人资料修改；修改会保存至本地，刷新/重启后保留。退出后使用密码 `mock123456` 登录。版本冲突、未登录、记录不存在和主要输入约束也会返回模拟错误。
 
 Mock 不请求后端，不读取真实凭据，快照和数据与正式接口隔离。仅显式传入 `MOCK_API=true` 时开启，正常构建默认关闭。Web 重置数据可在浏览器开发者工具 Application → Local Storage 删除 `flutter.fooddiary:mock:v1` 和 `flutter.snapshot:mock://local` 后刷新；Android 可清除应用数据。图片以 base64 保存，建议使用少量小图，避免耗尽浏览器本地存储配额。
 
