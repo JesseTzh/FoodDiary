@@ -95,7 +95,10 @@ done
 
 log_command 'Checking foreground activity'
 timeout 15s adb shell dumpsys activity activities > "$ARTIFACTS/activities.txt"
-if ! grep -E '(mResumedActivity|topResumedActivity)' "$ARTIFACTS/activities.txt" | grep -Fq "$ACTIVITY"; then
+if ! awk -v activity="$ACTIVITY" '
+  /mResumedActivity|topResumedActivity/ && index($0, activity) { found = 1 }
+  END { exit !found }
+' "$ARTIFACTS/activities.txt"; then
   echo 'App activity is not in the foreground' >&2
   exit 1
 fi

@@ -26,6 +26,8 @@ await context.tracing.start({ screenshots: true, snapshots: true, sources: true 
 const page = await context.newPage();
 const messages = [];
 const errors = [];
+const loginAborts = [];
+let successfulLoginRequest;
 let authenticationStarted = false;
 let unauthenticatedRefreshes = 0;
 
@@ -46,6 +48,15 @@ function installDiagnostics() {
     if (reason === 'net::ERR_ABORTED' && request.method() === 'GET' &&
         url.pathname === '/api/v1/auth/status') {
       messages.push(`Expected request cancellation: ${request.url()}`);
+      return;
+    }
+    // A login response can be cancelled after its headers set the session
+    // cookie. Defer classification until both that response and the home UI
+    // have been verified; other aborted requests remain failures.
+    if (reason === 'net::ERR_ABORTED' && request.method() === 'POST' &&
+        url.origin === new URL(baseURL).origin && url.pathname === '/api/v1/auth/login') {
+      loginAborts.push(request);
+      messages.push(`Login response cancellation: ${request.url()}`);
       return;
     }
     errors.push(`${request.url()}: ${reason}`);
@@ -103,6 +114,7 @@ async function authenticate() {
     throw new Error(`Login request failed with HTTP ${loginResponse.status()}`);
   }
   await expect(page.locator('[flt-semantics-identifier="home-record-action"]')).toBeVisible();
+  successfulLoginRequest = loginResponse.request();
 }
 
 async function assertPersistedEntry() {
@@ -115,6 +127,11 @@ async function saveEvidence() {
   await page.screenshot({ path: resolve(artifacts, `${phase}.png`) });
   if (unauthenticatedRefreshes > 1) {
     throw new Error(`Expected at most one unauthenticated refresh probe, got ${unauthenticatedRefreshes}`);
+  }
+  for (const request of loginAborts) {
+    if (request !== successfulLoginRequest) {
+      errors.push(`${request.url()}: net::ERR_ABORTED`);
+    }
   }
   expect(errors, 'Browser errors and failed resources').toEqual([]);
 }

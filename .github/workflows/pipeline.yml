@@ -131,6 +131,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Free disk space for Android emulator
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/share/boost /opt/ghc /usr/local/.ghcup
+          df -h /
+
       - name: Download APK
         uses: actions/download-artifact@v8
         with:

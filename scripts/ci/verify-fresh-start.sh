@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boot the production image on an empty volume, verify the password login flow,
 # create an entry, then restart against the same volume and verify persistence.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'status=$?; printf "[web-startup] Failed at line %s (exit status %s)\n" "$LINENO" "$status" >&2' ERR
 
 IMAGE="${CI_IMAGE:-fooddiary-ci:local}"
 CONTAINER="${CI_CONTAINER:-fooddiary-ci}"
@@ -38,7 +39,7 @@ wait_ready() {
     if curl --fail --silent "$READY_URL"; then
       return 0
     fi
-    docker inspect --format '{{.State.Running}}' "$CONTAINER" | grep --quiet true
+    [[ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER")" == true ]]
     sleep 1
   done
   return 1
@@ -63,7 +64,8 @@ docker run --detach --name "$CONTAINER" \
 wait_ready 60
 
 # The SPA frontend must be baked into the image.
-curl --fail --silent --show-error "$BASE_URL/" | grep --quiet FoodDiary
+curl --fail --silent --show-error "$BASE_URL/" > "$ARTIFACTS/index.html"
+grep --quiet FoodDiary "$ARTIFACTS/index.html"
 
 # A fresh instance has no password yet and rejects unauthenticated API calls.
 STATUS="$(curl --fail --silent --show-error "$BASE_URL/api/v1/auth/status")"
