@@ -28,7 +28,8 @@ import (
 )
 
 type Entry struct {
-	Meal        string           `json:"meal"`
+	// Kept for database migration compatibility; meal is no longer part of the API.
+	Meal        string           `json:"-"`
 	Mood        int              `json:"mood"`
 	Favorite    bool             `json:"favorite"`
 	ID          string           `json:"id"`
@@ -51,16 +52,23 @@ type Entry struct {
 	SharedWithGuests bool `json:"shared_with_guests"`
 }
 type Dish struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	Notes  string   `json:"notes,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
+	Rating int      `json:"rating,omitempty"`
 }
 type Media struct {
-	ID       string `json:"id"`
-	EntryID  string `json:"entry_id"`
-	Mime     string `json:"mime"`
-	Size     int64  `json:"size_bytes"`
-	URL      string `json:"url"`
-	RecipeID string `json:"recipe_id,omitempty"`
+	ID         string  `json:"id"`
+	EntryID    string  `json:"entry_id"`
+	Mime       string  `json:"mime"`
+	Size       int64   `json:"size_bytes"`
+	URL        string  `json:"url"`
+	RecipeID   string  `json:"recipe_id,omitempty"`
+	CropX      float64 `json:"crop_x,omitempty"`
+	CropY      float64 `json:"crop_y,omitempty"`
+	CropWidth  float64 `json:"crop_width,omitempty"`
+	CropHeight float64 `json:"crop_height,omitempty"`
 }
 type App struct {
 	db      *sql.DB
@@ -376,7 +384,7 @@ func (a *App) tags(entry string) []string {
 	return o
 }
 func (a *App) media(entry string) []Media {
-	rows, _ := a.db.Query("SELECT id,entry_id,mime,size_bytes,COALESCE(recipe_id,'') FROM media_assets WHERE entry_id=? ORDER BY created_at", entry)
+	rows, _ := a.db.Query("SELECT id,entry_id,mime,size_bytes,COALESCE(recipe_id,''),crop_x,crop_y,crop_width,crop_height FROM media_assets WHERE entry_id=? ORDER BY created_at", entry)
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -386,7 +394,7 @@ func (a *App) media(entry string) []Media {
 	if rows != nil {
 		for rows.Next() {
 			var m Media
-			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size, &m.RecipeID)
+			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size, &m.RecipeID, &m.CropX, &m.CropY, &m.CropWidth, &m.CropHeight)
 			m.URL = "/media/assets/" + m.ID + "/original"
 			o = append(o, m)
 		}
@@ -648,8 +656,26 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 }
 func (a *App) delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	t := now()
-	res, e := a.db.Exec("UPDATE diary_entries SET deleted_at=?,updated_at=?,version=version+1 WHERE id=? AND deleted_at IS NULL", t, t, id)
+	tx, e := a.db.Begin()
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	defer tx.Rollback()
+	rows, e := tx.Query("SELECT id FROM media_assets WHERE entry_id=?", id)
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	var media []string
+	for rows.Next() {
+		var mid string
+		if rows.Scan(&mid) == nil {
+			media = append(media, mid)
+		}
+	}
+	rows.Close()
+	res, e := tx.Exec("DELETE FROM diary_entries WHERE id=?", id)
 	if e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
@@ -659,7 +685,19 @@ func (a *App) delete(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 404, "NOT_FOUND", "entry not found")
 		return
 	}
-	a.db.Exec("INSERT INTO sync_changes(entity_type,entity_id,operation,version,changed_at) SELECT 'entry',id,'delete',version,updated_at FROM diary_entries WHERE id=?", id)
+	for _, mid := range media {
+		if _, e = tx.Exec("DELETE FROM media_assets WHERE id=?", mid); e != nil {
+			errJSON(w, 500, "DB", e.Error())
+			return
+		}
+	}
+	if e = tx.Commit(); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	for _, mid := range media {
+		_ = os.Remove(filepath.Join(a.data, "media", mid))
+	}
 	writeJSON(w, 200, map[string]any{"id": id})
 }
 func (a *App) copy(w http.ResponseWriter, r *http.Request) {
@@ -712,12 +750,43 @@ func (a *App) stats(w http.ResponseWriter, r *http.Request) {
 func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	entry := chi.URLParam(r, "id")
 	recipe := strings.TrimSpace(r.URL.Query().Get("recipe_id"))
+	directRecipe := chi.URLParam(r, "recipeID")
+	if directRecipe != "" {
+		entry, recipe = "", directRecipe
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
 	if e := r.ParseMultipartForm(2 << 20); e != nil {
 		errJSON(w, 400, "VALIDATION_ERROR", "单张照片不能超过 20 MB")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
+	parseCrop := func(name string, fallback float64) float64 {
+		v, e := strconv.ParseFloat(r.FormValue(name), 64)
+		if e != nil {
+			return fallback
+		}
+		return v
+	}
+	cropX, cropY := parseCrop("crop_x", 0), parseCrop("crop_y", 0)
+	cropW, cropH := parseCrop("crop_width", 1), parseCrop("crop_height", 1)
+	if cropX < 0 {
+		cropX = 0
+	}
+	if cropY < 0 {
+		cropY = 0
+	}
+	if cropW <= 0 {
+		cropW = 1
+	}
+	if cropH <= 0 {
+		cropH = 1
+	}
+	if cropX+cropW > 1 {
+		cropX = 1 - cropW
+	}
+	if cropY+cropH > 1 {
+		cropY = 1 - cropH
+	}
 	f, h, e := r.FormFile("file")
 	if e != nil {
 		errJSON(w, 400, "VALIDATION_ERROR", "请选择照片")
@@ -741,11 +810,19 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var count int
-	if e = tx.QueryRow("SELECT count(*) FROM diary_entries WHERE id=? AND deleted_at IS NULL", entry).Scan(&count); e != nil || count == 0 {
-		errJSON(w, 404, "NOT_FOUND", "entry not found")
-		return
+	if entry != "" {
+		if e = tx.QueryRow("SELECT count(*) FROM diary_entries WHERE id=? AND deleted_at IS NULL", entry).Scan(&count); e != nil || count == 0 {
+			errJSON(w, 404, "NOT_FOUND", "entry not found")
+			return
+		}
 	}
-	if recipe != "" {
+	if directRecipe != "" {
+		if e = tx.QueryRow("SELECT count(*) FROM recipes WHERE id=?", recipe).Scan(&count); e != nil || count == 0 {
+			errJSON(w, 404, "NOT_FOUND", "未找到菜谱")
+			return
+		}
+	}
+	if recipe != "" && entry != "" {
 		var raw string
 		if e = tx.QueryRow("SELECT dishes_json FROM diary_entries WHERE id=?", entry).Scan(&raw); e != nil {
 			errJSON(w, 500, "DB", e.Error())
@@ -765,8 +842,31 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if e = tx.QueryRow("SELECT count(*) FROM media_assets WHERE entry_id=?", entry).Scan(&count); e != nil {
+	ownerClause, ownerID := "entry_id=?", entry
+	if directRecipe != "" {
+		ownerClause, ownerID = "recipe_id=? AND entry_id IS NULL", recipe
+	}
+	if e = tx.QueryRow("SELECT count(*) FROM media_assets WHERE "+ownerClause, ownerID).Scan(&count); e != nil {
 		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	sum := sha256.Sum256(raw)
+	var existing string
+	if e = tx.QueryRow("SELECT id FROM media_assets WHERE "+ownerClause+" AND sha256=? LIMIT 1", ownerID, hex.EncodeToString(sum[:])).Scan(&existing); e == nil {
+		if recipe != "" {
+			_, e = tx.Exec("UPDATE media_assets SET recipe_id=? WHERE id=?", recipe, existing)
+			if e == nil {
+				_, e = tx.Exec("UPDATE recipes SET cover_media_id=? WHERE id=?", existing, recipe)
+			}
+		}
+		if e == nil {
+			e = tx.Commit()
+		}
+		if e != nil {
+			errJSON(w, 500, "DB", e.Error())
+			return
+		}
+		writeJSON(w, 200, Media{ID: existing, EntryID: entry, RecipeID: recipe, URL: "/media/assets/" + existing + "/original", CropX: cropX, CropY: cropY, CropWidth: cropW, CropHeight: cropH})
 		return
 	}
 	if count >= 9 {
@@ -779,12 +879,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	mid := id()
 	dst := filepath.Join(a.data, "media", mid)
-	sum := sha256.Sum256(raw)
 	if e = os.WriteFile(dst, raw, 0600); e != nil {
 		errJSON(w, 500, "MEDIA", e.Error())
 		return
 	}
-	_, e = tx.Exec("INSERT INTO media_assets(id,entry_id,recipe_id,original_name,mime,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)", mid, entry, nullableString(recipe), h.Filename, mime, len(raw), hex.EncodeToString(sum[:]), now())
+	_, e = tx.Exec("INSERT INTO media_assets(id,entry_id,recipe_id,original_name,mime,size_bytes,sha256,created_at,crop_x,crop_y,crop_width,crop_height) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", mid, nullableString(entry), nullableString(recipe), h.Filename, mime, len(raw), hex.EncodeToString(sum[:]), now(), cropX, cropY, cropW, cropH)
 	if e == nil && recipe != "" {
 		_, e = tx.Exec("UPDATE recipes SET cover_media_id=? WHERE id=?", mid, recipe)
 	}
@@ -796,7 +895,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
-	writeJSON(w, 201, Media{ID: mid, EntryID: entry, RecipeID: recipe, Mime: mime, Size: int64(len(raw)), URL: "/media/assets/" + mid + "/original"})
+	writeJSON(w, 201, Media{ID: mid, EntryID: entry, RecipeID: recipe, Mime: mime, Size: int64(len(raw)), URL: "/media/assets/" + mid + "/original", CropX: cropX, CropY: cropY, CropWidth: cropW, CropHeight: cropH})
 }
 func nullableString(s string) any {
 	if s == "" {
@@ -813,7 +912,7 @@ func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var mime string
-	if e := a.db.QueryRow("SELECT m.mime FROM media_assets m JOIN diary_entries e ON e.id=m.entry_id WHERE m.id=? AND e.deleted_at IS NULL", id).Scan(&mime); e != nil {
+	if e := a.db.QueryRow("SELECT m.mime FROM media_assets m LEFT JOIN diary_entries e ON e.id=m.entry_id WHERE m.id=? AND ((m.entry_id IS NOT NULL AND e.deleted_at IS NULL) OR (m.entry_id IS NULL AND m.recipe_id IS NOT NULL))", id).Scan(&mime); e != nil {
 		http.NotFound(w, r)
 		return
 	}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"github.com/go-chi/chi/v5"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,12 +27,70 @@ type Recipe struct {
 func (a *App) kitchenRoutes(r chi.Router) {
 	r.Get("/recipes", a.recipes)
 	r.Post("/recipes", a.saveRecipe)
+	r.Post("/recipes/{recipeID}/media", a.upload)
 	r.Patch("/recipes/{id}", a.saveRecipe)
+	r.Delete("/recipes/{id}", a.deleteRecipe)
 	r.Patch("/recipes/{id}/favorite", a.recipeFavorite)
 	r.Patch("/recipes/{id}/cover", a.recipeCover)
 	r.Patch("/entries/{id}/favorite", a.entryFavorite)
 	r.Get("/profile", a.profile)
 	r.Patch("/profile", a.saveProfile)
+}
+
+func (a *App) deleteRecipe(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	tx, e := a.db.Begin()
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	defer tx.Rollback()
+	rows, e := tx.Query("SELECT id,COALESCE(entry_id,'') FROM media_assets WHERE recipe_id=?", id)
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	var assets []struct{ id, entry string }
+	for rows.Next() {
+		var x struct{ id, entry string }
+		if rows.Scan(&x.id, &x.entry) == nil {
+			assets = append(assets, x)
+		}
+	}
+	rows.Close()
+	for _, asset := range assets {
+		// A diary owns the bytes. Removing a recipe only removes its association;
+		// orphan assets are physically removed as well.
+		if asset.entry != "" {
+			_, e = tx.Exec("UPDATE media_assets SET recipe_id=NULL WHERE id=?", asset.id)
+		} else {
+			_, e = tx.Exec("DELETE FROM media_assets WHERE id=?", asset.id)
+		}
+		if e != nil {
+			errJSON(w, 500, "DB", e.Error())
+			return
+		}
+	}
+	res, e := tx.Exec("DELETE FROM recipes WHERE id=?", id)
+	if e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		errJSON(w, 404, "NOT_FOUND", "未找到菜谱")
+		return
+	}
+	if e = tx.Commit(); e != nil {
+		errJSON(w, 500, "DB", e.Error())
+		return
+	}
+	for _, asset := range assets {
+		if asset.entry == "" {
+			os.Remove(filepath.Join(a.data, "media", asset.id))
+		}
+	}
+	writeJSON(w, 200, map[string]any{"id": id})
 }
 func (a *App) recipes(w http.ResponseWriter, r *http.Request) {
 	rows, e := a.db.Query("SELECT id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id FROM recipes ORDER BY custom DESC,rowid")
@@ -55,7 +115,7 @@ func (a *App) recipes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func (a *App) recipeMedia(recipe string) []Media {
-	rows, _ := a.db.Query("SELECT id,entry_id,mime,size_bytes FROM media_assets WHERE recipe_id=? ORDER BY created_at", recipe)
+	rows, _ := a.db.Query("SELECT id,COALESCE(entry_id,''),mime,size_bytes,crop_x,crop_y,crop_width,crop_height FROM media_assets WHERE recipe_id=? ORDER BY created_at", recipe)
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -65,7 +125,7 @@ func (a *App) recipeMedia(recipe string) []Media {
 	if rows != nil {
 		for rows.Next() {
 			var m Media
-			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size)
+			rows.Scan(&m.ID, &m.EntryID, &m.Mime, &m.Size, &m.CropX, &m.CropY, &m.CropWidth, &m.CropHeight)
 			m.RecipeID = recipe
 			m.URL = "/media/assets/" + m.ID + "/original"
 			out = append(out, m)

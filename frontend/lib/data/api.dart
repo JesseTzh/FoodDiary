@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -153,8 +154,18 @@ class Api {
     return value['data'];
   }
 
-  Future<void> upload(String id, XFile file, {String? recipeId}) async {
-    if (mock) return _mockStore!.upload(id, file, recipeId: recipeId);
+  Future<void> uploadRecipe(String recipeId, XFile file, {Rect? crop}) =>
+      upload('', file, recipeId: recipeId, crop: crop);
+
+  Future<void> upload(
+    String id,
+    XFile file, {
+    String? recipeId,
+    Rect? crop,
+  }) async {
+    if (mock) {
+      return _mockStore!.upload(id, file, recipeId: recipeId, crop: crop);
+    }
     await _ensureAccess();
     final bytes = await file.readAsBytes();
     Future<http.Response> send() async {
@@ -162,7 +173,9 @@ class Api {
         'POST',
         Uri.parse(
           url(
-            '/api/v1/entries/$id/media${recipeId == null ? '' : '?recipe_id=$recipeId'}',
+            id.isEmpty
+                ? '/api/v1/recipes/$recipeId/media'
+                : '/api/v1/entries/$id/media${recipeId == null ? '' : '?recipe_id=$recipeId'}',
           ),
         ),
       );
@@ -173,6 +186,13 @@ class Api {
       req.files.add(
         http.MultipartFile.fromBytes('file', bytes, filename: file.name),
       );
+      final c = crop ?? const Rect.fromLTWH(0, 0, 1, 1);
+      req.fields.addAll({
+        'crop_x': '${c.left}',
+        'crop_y': '${c.top}',
+        'crop_width': '${c.width}',
+        'crop_height': '${c.height}',
+      });
       return http.Response.fromStream(
         await client.send(req).timeout(const Duration(seconds: 60)),
       );

@@ -7,6 +7,8 @@ import 'package:image_picker/image_picker.dart';
 import '../data/api.dart';
 import '../data/models.dart';
 import 'theme.dart';
+import 'image_upload.dart';
+import '../version.dart';
 
 /// Reads the capture date stored in common image metadata.
 ///
@@ -123,12 +125,14 @@ class DishPhoto extends StatelessWidget {
   final String? path;
   final double? width;
   final double height;
+  final Rect? crop;
   const DishPhoto({
     super.key,
     required this.api,
     this.path,
     this.width,
     this.height = 220,
+    this.crop,
   });
   @override
   Widget build(BuildContext context) => ClipRRect(
@@ -138,24 +142,36 @@ class DishPhoto extends StatelessWidget {
       height: height,
       child: path == null
           ? placeholder()
-          : api.mock && path!.startsWith('asset:')
-          ? Image.asset(path!.substring(6), fit: BoxFit.cover)
-          : api.mock && path!.startsWith('data:')
-          ? Image.memory(
-              base64Decode(path!.split(',').last),
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => placeholder(),
-            )
-          : Image.network(
-              api.url(path!),
-              headers: kIsWeb ? null : api.headers,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => placeholder(),
-              loadingBuilder: (_, child, progress) =>
-                  progress == null ? child : placeholder(),
+          : _cropped(
+              api.mock && path!.startsWith('asset:')
+                  ? Image.asset(path!.substring(6), fit: BoxFit.cover)
+                  : api.mock && path!.startsWith('data:')
+                  ? Image.memory(
+                      base64Decode(path!.split(',').last),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => placeholder(),
+                    )
+                  : Image.network(
+                      api.url(path!),
+                      headers: kIsWeb ? null : api.headers,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => placeholder(),
+                      loadingBuilder: (_, child, progress) =>
+                          progress == null ? child : placeholder(),
+                    ),
             ),
     ),
   );
+  Widget _cropped(Widget image) {
+    final c = crop;
+    if (c == null || c.width >= .99 && c.height >= .99) return image;
+    return Transform.scale(
+      scale: 1 / (c.width < c.height ? c.width : c.height),
+      alignment: Alignment((c.center.dx - .5) * 2, (c.center.dy - .5) * 2),
+      child: image,
+    );
+  }
+
   Widget placeholder() => Container(
     color: const Color(0xFFFFEFD9),
     child: const Center(
@@ -165,6 +181,19 @@ class DishPhoto extends StatelessWidget {
         size: 40,
       ),
     ),
+  );
+}
+
+Rect? cropFromMedia(dynamic media) {
+  if (media is! Map) return null;
+  final w = (media['crop_width'] as num?)?.toDouble() ?? 1;
+  final h = (media['crop_height'] as num?)?.toDouble() ?? 1;
+  if (w >= .99 && h >= .99) return null;
+  return Rect.fromLTWH(
+    (media['crop_x'] as num?)?.toDouble() ?? 0,
+    (media['crop_y'] as num?)?.toDouble() ?? 0,
+    w,
+    h,
   );
 }
 
@@ -310,6 +339,10 @@ class _WelcomePageState extends State<WelcomePage> {
                   ),
                 ],
                 const SizedBox(height: 24),
+                const Text(
+                  appVersion,
+                  style: TextStyle(color: muted, fontSize: 11),
+                ),
               ],
             ),
           ),
@@ -340,10 +373,13 @@ class _RecordPageState extends State<RecordPage> {
   late TextEditingController notes;
   final customTag = TextEditingController();
   late DateTime date;
-  String meal = '晚餐', category = '家常菜';
+  String category = '家常菜';
+  int step = 0;
   int mood = 0;
+  int rating = 0;
   final Set<String> tags = {};
   final List<XFile> files = [];
+  final List<Rect> fileCrops = [];
   final List<int> fileDishIndices = [];
   final List<Uint8List> previews = [];
   final List<Map<String, dynamic>> dishes = [];
@@ -359,9 +395,10 @@ class _RecordPageState extends State<RecordPage> {
     final e = widget.entry;
     notes = TextEditingController(text: e?.notes ?? '');
     date = e == null ? DateTime.now() : DateTime.parse(e.date);
-    meal = e?.meal ?? meal;
+    step = e == null ? 0 : 1;
     category = categories.contains(e?.category) ? e!.category : category;
     mood = e?.mood ?? 0;
+    rating = e?.rating ?? 0;
     tags.addAll(e?.tags ?? []);
     dishes.addAll(
       e?.dishes.isNotEmpty == true
@@ -403,29 +440,21 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> pick(ImageSource source) async {
     try {
-      final picker = ImagePicker();
-      final selected = source == ImageSource.camera
-          ? [
-              await picker.pickImage(
-                source: source,
-                maxWidth: 1600,
-                imageQuality: 85,
-              ),
-            ]
-          : await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
       final room = 9 - (widget.entry?.photos.length ?? 0) - files.length;
-      final incoming = selected.whereType<XFile>().take(room).toList();
+      final selected = await ImageUpload.pick(
+        context,
+        source: source,
+        max: room,
+      );
       DateTime? suggestedDate;
-      for (final f in incoming) {
-        final data = await f.readAsBytes();
-        if (data.length > 20 * 1024 * 1024) {
-          if (mounted) toast(context, '单张照片不能超过 20 MB');
-          continue;
-        }
+      for (final picked in selected) {
+        final f = picked.file;
+        final data = picked.bytes;
         if (mounted) {
           setState(() {
             files.add(f);
             previews.add(data);
+            fileCrops.add(picked.crop);
             fileDishIndices.add(photoDishIndex.clamp(0, dishes.length - 1));
           });
         }
@@ -455,7 +484,7 @@ class _RecordPageState extends State<RecordPage> {
           setState(() => date = suggestedDate!);
         }
       }
-      if (selected.length > room && mounted) toast(context, '最多可以保存 9 张照片');
+      if (selected.length >= room && mounted) toast(context, '最多可以保存 9 张照片');
     } catch (e) {
       if (mounted) toast(context, e);
     }
@@ -465,7 +494,7 @@ class _RecordPageState extends State<RecordPage> {
       a.year == b.year && a.month == b.month && a.day == b.day;
 
   Future<void> save() async {
-    if (!form.currentState!.validate()) return;
+    if (step != 2 && !(form.currentState?.validate() ?? false)) return;
     setState(() => saving = true);
     try {
       if (savedId == null) {
@@ -473,13 +502,20 @@ class _RecordPageState extends State<RecordPage> {
           ...?widget.entry?.toJson(),
           'title': dishes.first['title'],
           'dishes': dishes
-              .map((d) => {'id': d['id'], 'title': d['title']})
+              .map(
+                (d) => {
+                  'id': d['id'],
+                  'title': d['title'],
+                  'notes': d['notes'] ?? '',
+                  'rating': d['rating'] ?? 0,
+                },
+              )
               .toList(),
           'notes': notes.text.trim(),
           'cooked_on': date.toIso8601String().substring(0, 10),
-          'meal': meal,
           'category': category,
           'mood': mood,
+          'rating': rating == 0 ? null : rating,
           'tags': tags.toList(),
         };
         final result = await widget.api.request(
@@ -504,6 +540,7 @@ class _RecordPageState extends State<RecordPage> {
         await widget.api.upload(
           savedId!,
           files[uploaded],
+          crop: fileCrops[uploaded],
           recipeId: dishId == null || dishId.isEmpty ? null : dishId,
         );
         uploaded++;
@@ -521,6 +558,137 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
+  Widget _photoStep() => Column(
+    key: const ValueKey('photo-step'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      CozyCard(
+        child: Column(
+          children: [
+            const Icon(Icons.auto_awesome, size: 38, color: orange),
+            const SizedBox(height: 12),
+            const Text(
+              '先上传这道菜的照片',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '支持一次选择多张，照片会自动复用，不重复占用空间。',
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: saving ? null : () => pick(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('选择照片'),
+                ),
+                TextButton.icon(
+                  onPressed: saving ? null : () => pick(ImageSource.camera),
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: const Text('拍照'),
+                ),
+              ],
+            ),
+            if (previews.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final p in previews)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.memory(
+                          p,
+                          width: 76,
+                          height: 76,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 20),
+      PrimaryButton(
+        '填写菜品信息',
+        icon: Icons.arrow_forward_rounded,
+        onPressed: previews.isEmpty && widget.entry == null
+            ? null
+            : () => setState(() => step = 1),
+      ),
+    ],
+  );
+
+  Widget _finalStep() => Form(
+    key: const ValueKey('final-step'),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CozyCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '今天的心情与心得',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '给今天的厨房时光留下一句话。',
+                style: TextStyle(color: muted, fontSize: 12),
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                controller: notes,
+                maxLength: 200,
+                maxLines: 4,
+                decoration: const InputDecoration(hintText: '今天的做饭心得…'),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(
+                  5,
+                  (i) => InkWell(
+                    onTap: () => setState(() => mood = i),
+                    borderRadius: BorderRadius.circular(16),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: mood == i
+                            ? const Color(0xFFFFEACB)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        moods[i],
+                        style: const TextStyle(fontSize: 28),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        PrimaryButton(
+          saving ? '正在保存…' : '保存今天的日记',
+          icon: Icons.check_rounded,
+          onPressed: saving ? null : save,
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !saving,
@@ -528,427 +696,515 @@ class _RecordPageState extends State<RecordPage> {
       appBar: AppBar(title: Text(widget.entry == null ? '记录做饭' : '编辑日记')),
       body: PageBody(
         children: [
-          Form(
-            key: form,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CozyCard(
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.camera_alt_outlined,
-                        size: 30,
-                        color: Color(0xFF8C6746),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text('晒晒今天的美味', style: TextStyle(fontSize: 13)),
-                      const SizedBox(height: 4),
-                      const Text(
-                        '最多可添加 9 张照片',
-                        style: TextStyle(fontSize: 11, color: muted),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButton<int>(
-                        isExpanded: true,
-                        value: photoDishIndex.clamp(0, dishes.length - 1),
-                        onChanged: savedId != null
-                            ? null
-                            : (v) {
-                                if (v != null) {
-                                  setState(() => photoDishIndex = v);
-                                }
-                              },
-                        items: [
-                          for (var i = 0; i < dishes.length; i++)
-                            DropdownMenuItem(
-                              value: i,
-                              child: Text(
-                                '照片归属：${dishes[i]['title'].toString().isEmpty ? '第 ${i + 1} 道菜' : dishes[i]['title']}',
-                                overflow: TextOverflow.ellipsis,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 420),
+            transitionBuilder: (child, animation) => SlideTransition(
+              position:
+                  Tween<Offset>(
+                    begin: const Offset(0.22, 0),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutCubic,
+                    ),
+                  ),
+              child: FadeTransition(opacity: animation, child: child),
+            ),
+            child: step == 0
+                ? _photoStep()
+                : step == 2
+                ? _finalStep()
+                : Form(
+                    key: form,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CozyCard(
+                          child: Column(
+                            children: [
+                              const Icon(
+                                Icons.camera_alt_outlined,
+                                size: 30,
+                                color: Color(0xFF8C6746),
                               ),
-                            ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          TextButton.icon(
-                            onPressed: saving || savedId != null
-                                ? null
-                                : () => pick(ImageSource.gallery),
-                            icon: const Icon(
-                              Icons.photo_library_outlined,
-                              size: 18,
-                            ),
-                            label: const Text('选择照片'),
+                              const SizedBox(height: 8),
+                              const Text(
+                                '晒晒今天的美味',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                '最多可添加 9 张照片',
+                                style: TextStyle(fontSize: 11, color: muted),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButton<int>(
+                                isExpanded: true,
+                                value: photoDishIndex.clamp(
+                                  0,
+                                  dishes.length - 1,
+                                ),
+                                onChanged: savedId != null
+                                    ? null
+                                    : (v) {
+                                        if (v != null) {
+                                          setState(() => photoDishIndex = v);
+                                        }
+                                      },
+                                items: [
+                                  for (var i = 0; i < dishes.length; i++)
+                                    DropdownMenuItem(
+                                      value: i,
+                                      child: Text(
+                                        '照片归属：${dishes[i]['title'].toString().isEmpty ? '第 ${i + 1} 道菜' : dishes[i]['title']}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: saving || savedId != null
+                                        ? null
+                                        : () => pick(ImageSource.gallery),
+                                    icon: const Icon(
+                                      Icons.photo_library_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('选择照片'),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: saving || savedId != null
+                                        ? null
+                                        : () => pick(ImageSource.camera),
+                                    icon: const Icon(
+                                      Icons.camera_alt_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('拍照'),
+                                  ),
+                                ],
+                              ),
+                              if (previews.isNotEmpty ||
+                                  widget.entry?.photos.isNotEmpty == true)
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final path
+                                        in widget.entry?.photos ?? <String>[])
+                                      DishPhoto(
+                                        api: widget.api,
+                                        path: path,
+                                        width: 76,
+                                        height: 76,
+                                      ),
+                                    for (var i = 0; i < previews.length; i++)
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Stack(
+                                            children: [
+                                              ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                child: Image.memory(
+                                                  previews[i],
+                                                  width: 76,
+                                                  height: 76,
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                              if (savedId == null)
+                                                Positioned(
+                                                  top: -8,
+                                                  right: -8,
+                                                  child: IconButton(
+                                                    onPressed: saving
+                                                        ? null
+                                                        : () => setState(() {
+                                                            files.removeAt(i);
+                                                            previews.removeAt(
+                                                              i,
+                                                            );
+                                                            fileDishIndices
+                                                                .removeAt(i);
+                                                            fileCrops.removeAt(
+                                                              i,
+                                                            );
+                                                          }),
+                                                    icon: const Icon(
+                                                      Icons.cancel,
+                                                      color: ink,
+                                                      size: 20,
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          SizedBox(
+                                            width: 130,
+                                            child: DropdownButton<int>(
+                                              isExpanded: true,
+                                              value: fileDishIndices[i],
+                                              onChanged:
+                                                  saving || savedId != null
+                                                  ? null
+                                                  : (v) {
+                                                      if (v != null) {
+                                                        setState(
+                                                          () =>
+                                                              fileDishIndices[i] =
+                                                                  v,
+                                                        );
+                                                      }
+                                                    },
+                                              items: [
+                                                for (
+                                                  var d = 0;
+                                                  d < dishes.length;
+                                                  d++
+                                                )
+                                                  DropdownMenuItem(
+                                                    value: d,
+                                                    child: Text(
+                                                      dishes[d]['title']
+                                                              .toString()
+                                                              .trim()
+                                                              .isEmpty
+                                                          ? '第 ${d + 1} 道菜'
+                                                          : dishes[d]['title'],
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                            ],
                           ),
-                          TextButton.icon(
-                            onPressed: saving || savedId != null
-                                ? null
-                                : () => pick(ImageSource.camera),
-                            icon: const Icon(
-                              Icons.camera_alt_outlined,
-                              size: 18,
+                        ),
+                        const SizedBox(height: 26),
+                        label('今天做的菜'),
+                        for (var i = 0; i < dishes.length; i++)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Autocomplete<Recipe>(
+                                    key: ObjectKey(dishes[i]),
+                                    initialValue: TextEditingValue(
+                                      text: dishes[i]['title'] ?? '',
+                                    ),
+                                    optionsBuilder: (v) => v.text.trim().isEmpty
+                                        ? const []
+                                        : recipes.where(
+                                            (r) =>
+                                                r.title.toLowerCase().contains(
+                                                  v.text.trim().toLowerCase(),
+                                                ),
+                                          ),
+                                    displayStringForOption: (r) => r.title,
+                                    onSelected: (r) => setState(() {
+                                      dishes[i].addAll({
+                                        'id': r.id,
+                                        'title': r.title,
+                                      });
+                                    }),
+                                    fieldViewBuilder:
+                                        (
+                                          context,
+                                          controller,
+                                          focus,
+                                          submit,
+                                        ) => TextFormField(
+                                          controller: controller,
+                                          focusNode: focus,
+                                          readOnly: savedId != null,
+                                          maxLength: 80,
+                                          validator: (v) =>
+                                              (v == null || v.trim().isEmpty)
+                                              ? '写下今天做的菜吧'
+                                              : null,
+                                          onChanged: (v) => setState(
+                                            () => dishes[i].addAll({
+                                              'id': '',
+                                              'title': v,
+                                            }),
+                                          ),
+                                          decoration: InputDecoration(
+                                            hintText: '菜名',
+                                            counterText: '',
+                                            suffixIcon: i > 0
+                                                ? IconButton(
+                                                    tooltip: '移除这道菜',
+                                                    onPressed: savedId == null
+                                                        ? () {
+                                                            if (fileDishIndices
+                                                                .contains(i)) {
+                                                              toast(
+                                                                context,
+                                                                '请先修改这道菜的照片归属或移除照片',
+                                                              );
+                                                              return;
+                                                            }
+                                                            setState(() {
+                                                              dishes.removeAt(
+                                                                i,
+                                                              );
+                                                              for (
+                                                                var f = 0;
+                                                                f <
+                                                                    fileDishIndices
+                                                                        .length;
+                                                                f++
+                                                              ) {
+                                                                if (fileDishIndices[f] >
+                                                                    i) {
+                                                                  fileDishIndices[f]--;
+                                                                }
+                                                              }
+                                                              photoDishIndex =
+                                                                  photoDishIndex ==
+                                                                      i
+                                                                  ? 0
+                                                                  : photoDishIndex >
+                                                                        i
+                                                                  ? photoDishIndex -
+                                                                        1
+                                                                  : photoDishIndex;
+                                                            });
+                                                          }
+                                                        : null,
+                                                    icon: const Icon(
+                                                      Icons.close,
+                                                    ),
+                                                  )
+                                                : null,
+                                          ),
+                                        ),
+                                    optionsViewBuilder:
+                                        (context, select, options) => Align(
+                                          alignment: Alignment.topLeft,
+                                          child: Material(
+                                            elevation: 4,
+                                            child: SizedBox(
+                                              width: 280,
+                                              child: ListView(
+                                                shrinkWrap: true,
+                                                children: options
+                                                    .map(
+                                                      (r) => ListTile(
+                                                        title: Text(r.title),
+                                                        onTap: () => select(r),
+                                                      ),
+                                                    )
+                                                    .toList(),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            label: const Text('拍照'),
                           ),
-                        ],
-                      ),
-                      if (previews.isNotEmpty ||
-                          widget.entry?.photos.isNotEmpty == true)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: savedId != null || dishes.length >= 20
+                                ? null
+                                : () => setState(
+                                    () => dishes.add({'id': '', 'title': ''}),
+                                  ),
+                            icon: const Icon(Icons.add),
+                            label: const Text('再添加一道菜'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        label('做饭日期'),
+                        OutlinedButton.icon(
+                          onPressed: savedId != null
+                              ? null
+                              : () async {
+                                  final d = await showDatePicker(
+                                    context: context,
+                                    initialDate: date,
+                                    firstDate: DateTime(2000),
+                                    lastDate: DateTime.now().add(
+                                      const Duration(days: 365),
+                                    ),
+                                  );
+                                  if (d != null) setState(() => date = d);
+                                },
+                          icon: const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 16,
+                          ),
+                          label: Text(date.toIso8601String().substring(0, 10)),
+                        ),
+                        const SizedBox(height: 18),
+                        label('这道菜的备注'),
+                        TextFormField(
+                          controller: notes,
+                          readOnly: savedId != null,
+                          maxLength: 200,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            hintText: '这道菜的制作备注…',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        label('标签'),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            for (final path
-                                in widget.entry?.photos ?? <String>[])
-                              DishPhoto(
-                                api: widget.api,
-                                path: path,
-                                width: 76,
-                                height: 76,
+                            for (final t in {...diaryTags, ...tags})
+                              Tag(
+                                t,
+                                selected: tags.contains(t),
+                                onTap: savedId != null
+                                    ? null
+                                    : () => setState(() {
+                                        tags.contains(t)
+                                            ? tags.remove(t)
+                                            : tags.add(t);
+                                      }),
                               ),
-                            for (var i = 0; i < previews.length; i++)
-                              Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Stack(
-                                    children: [
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Image.memory(
-                                          previews[i],
-                                          width: 76,
-                                          height: 76,
-                                          fit: BoxFit.cover,
-                                        ),
-                                      ),
-                                      if (savedId == null)
-                                        Positioned(
-                                          top: -8,
-                                          right: -8,
-                                          child: IconButton(
-                                            onPressed: saving
-                                                ? null
-                                                : () => setState(() {
-                                                    files.removeAt(i);
-                                                    previews.removeAt(i);
-                                                    fileDishIndices.removeAt(i);
-                                                  }),
-                                            icon: const Icon(
-                                              Icons.cancel,
-                                              color: ink,
-                                              size: 20,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                  SizedBox(
-                                    width: 130,
-                                    child: DropdownButton<int>(
-                                      isExpanded: true,
-                                      value: fileDishIndices[i],
-                                      onChanged: saving || savedId != null
-                                          ? null
-                                          : (v) {
-                                              if (v != null) {
-                                                setState(
-                                                  () => fileDishIndices[i] = v,
-                                                );
-                                              }
-                                            },
-                                      items: [
-                                        for (var d = 0; d < dishes.length; d++)
-                                          DropdownMenuItem(
-                                            value: d,
-                                            child: Text(
-                                              dishes[d]['title']
-                                                      .toString()
-                                                      .trim()
-                                                      .isEmpty
-                                                  ? '第 ${d + 1} 道菜'
-                                                  : dishes[d]['title'],
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                      ],
+                            Tag(
+                              '+',
+                              onTap: savedId != null
+                                  ? null
+                                  : () => setState(
+                                      () => showCustomTag = !showCustomTag,
                                     ),
-                                  ),
-                                ],
-                              ),
+                            ),
                           ],
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 26),
-                label('今天做的菜'),
-                for (var i = 0; i < dishes.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Autocomplete<Recipe>(
-                            key: ObjectKey(dishes[i]),
-                            initialValue: TextEditingValue(
-                              text: dishes[i]['title'] ?? '',
-                            ),
-                            optionsBuilder: (v) => v.text.trim().isEmpty
-                                ? const []
-                                : recipes.where(
-                                    (r) => r.title.toLowerCase().contains(
-                                      v.text.trim().toLowerCase(),
-                                    ),
-                                  ),
-                            displayStringForOption: (r) => r.title,
-                            onSelected: (r) => setState(() {
-                              dishes[i].addAll({'id': r.id, 'title': r.title});
-                            }),
-                            fieldViewBuilder:
-                                (
-                                  context,
-                                  controller,
-                                  focus,
-                                  submit,
-                                ) => TextFormField(
-                                  controller: controller,
-                                  focusNode: focus,
+                        if (showCustomTag) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  autofocus: true,
+                                  controller: customTag,
                                   readOnly: savedId != null,
-                                  maxLength: 80,
-                                  validator: (v) =>
-                                      (v == null || v.trim().isEmpty)
-                                      ? '写下今天做的菜吧'
-                                      : null,
-                                  onChanged: (v) => setState(
-                                    () => dishes[i].addAll({
-                                      'id': '',
-                                      'title': v,
-                                    }),
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: '菜名',
+                                  maxLength: 20,
+                                  onSubmitted: (_) => addCustomTag(),
+                                  decoration: const InputDecoration(
+                                    hintText: '添加自定义标签',
                                     counterText: '',
-                                    suffixIcon: i > 0
-                                        ? IconButton(
-                                            tooltip: '移除这道菜',
-                                            onPressed: savedId == null
-                                                ? () {
-                                                    if (fileDishIndices
-                                                        .contains(i)) {
-                                                      toast(
-                                                        context,
-                                                        '请先修改这道菜的照片归属或移除照片',
-                                                      );
-                                                      return;
-                                                    }
-                                                    setState(() {
-                                                      dishes.removeAt(i);
-                                                      for (
-                                                        var f = 0;
-                                                        f <
-                                                            fileDishIndices
-                                                                .length;
-                                                        f++
-                                                      ) {
-                                                        if (fileDishIndices[f] >
-                                                            i) {
-                                                          fileDishIndices[f]--;
-                                                        }
-                                                      }
-                                                      photoDishIndex =
-                                                          photoDishIndex == i
-                                                          ? 0
-                                                          : photoDishIndex > i
-                                                          ? photoDishIndex - 1
-                                                          : photoDishIndex;
-                                                    });
-                                                  }
-                                                : null,
-                                            icon: const Icon(Icons.close),
-                                          )
-                                        : null,
                                   ),
                                 ),
-                            optionsViewBuilder: (context, select, options) =>
-                                Align(
-                                  alignment: Alignment.topLeft,
-                                  child: Material(
-                                    elevation: 4,
-                                    child: SizedBox(
-                                      width: 280,
-                                      child: ListView(
-                                        shrinkWrap: true,
-                                        children: options
-                                            .map(
-                                              (r) => ListTile(
-                                                title: Text(r.title),
-                                                onTap: () => select(r),
-                                              ),
-                                            )
-                                            .toList(),
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              ),
+                              TextButton(
+                                onPressed: savedId != null
+                                    ? null
+                                    : addCustomTag,
+                                child: const Text('添加'),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        label('这道菜评分'),
+                        Row(
+                          children: List.generate(
+                            5,
+                            (i) => IconButton(
+                              tooltip: '${i + 1} 分',
+                              onPressed: savedId != null
+                                  ? null
+                                  : () => setState(() => rating = i + 1),
+                              icon: Icon(
+                                i < rating
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                color: gold,
+                              ),
+                            ),
                           ),
                         ),
+                        const SizedBox(height: 22),
+                        label('心情'),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: List.generate(
+                            5,
+                            (i) => Semantics(
+                              label: ['满足', '幸福', '开心', '惊喜', '不太顺利'][i],
+                              selected: mood == i,
+                              button: true,
+                              child: InkWell(
+                                onTap: savedId != null
+                                    ? null
+                                    : () => setState(() => mood = i),
+                                borderRadius: BorderRadius.circular(16),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: mood == i
+                                        ? const Color(0xFFFFEACB)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    moods[i],
+                                    style: const TextStyle(fontSize: 26),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: saving || dishes.length >= 20
+                                    ? null
+                                    : () => setState(() {
+                                        dishes.add({'id': '', 'title': ''});
+                                        step = 0;
+                                        photoDishIndex = dishes.length - 1;
+                                      }),
+                                icon: const Icon(Icons.add),
+                                label: const Text('加菜'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: PrimaryButton(
+                                saving ? '正在保存…' : '完成',
+                                icon: Icons.check_rounded,
+                                onPressed: saving
+                                    ? null
+                                    : () {
+                                        if (form.currentState?.validate() ??
+                                            false) {
+                                          setState(() => step = 2);
+                                        }
+                                      },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
                       ],
                     ),
                   ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: savedId != null || dishes.length >= 20
-                        ? null
-                        : () => setState(
-                            () => dishes.add({'id': '', 'title': ''}),
-                          ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('再添加一道菜'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                label('做饭日期'),
-                OutlinedButton.icon(
-                  onPressed: savedId != null
-                      ? null
-                      : () async {
-                          final d = await showDatePicker(
-                            context: context,
-                            initialDate: date,
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime.now().add(
-                              const Duration(days: 365),
-                            ),
-                          );
-                          if (d != null) setState(() => date = d);
-                        },
-                  icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                  label: Text(date.toIso8601String().substring(0, 10)),
-                ),
-                const SizedBox(height: 18),
-                label('餐次'),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: ['早餐', '午餐', '晚餐', '下午茶']
-                      .map(
-                        (m) => Tag(
-                          m,
-                          selected: meal == m,
-                          onTap: savedId != null
-                              ? null
-                              : () => setState(() => meal = m),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 22),
-                label('心得记录'),
-                TextFormField(
-                  controller: notes,
-                  readOnly: savedId != null,
-                  maxLength: 200,
-                  maxLines: 3,
-                  decoration: const InputDecoration(hintText: '今天的做饭心得…'),
-                ),
-                const SizedBox(height: 8),
-                label('标签'),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final t in {...diaryTags, ...tags})
-                      Tag(
-                        t,
-                        selected: tags.contains(t),
-                        onTap: savedId != null
-                            ? null
-                            : () => setState(() {
-                                tags.contains(t) ? tags.remove(t) : tags.add(t);
-                              }),
-                      ),
-                    Tag(
-                      '+',
-                      onTap: savedId != null
-                          ? null
-                          : () =>
-                                setState(() => showCustomTag = !showCustomTag),
-                    ),
-                  ],
-                ),
-                if (showCustomTag) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          autofocus: true,
-                          controller: customTag,
-                          readOnly: savedId != null,
-                          maxLength: 20,
-                          onSubmitted: (_) => addCustomTag(),
-                          decoration: const InputDecoration(
-                            hintText: '添加自定义标签',
-                            counterText: '',
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: savedId != null ? null : addCustomTag,
-                        child: const Text('添加'),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 22),
-                label('心情'),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(
-                    5,
-                    (i) => Semantics(
-                      label: ['满足', '幸福', '开心', '惊喜', '不太顺利'][i],
-                      selected: mood == i,
-                      button: true,
-                      child: InkWell(
-                        onTap: savedId != null
-                            ? null
-                            : () => setState(() => mood = i),
-                        borderRadius: BorderRadius.circular(16),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: mood == i
-                                ? const Color(0xFFFFEACB)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            moods[i],
-                            style: const TextStyle(fontSize: 26),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 28),
-                PrimaryButton(
-                  saving
-                      ? '正在保存美味…'
-                      : savedId != null
-                      ? '重试上传照片'
-                      : '保存',
-                  onPressed: saving ? null : save,
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
           ),
         ],
       ),
@@ -1071,14 +1327,12 @@ class _DiaryPageState extends State<DiaryPage> {
         DishPhoto(
           api: widget.api,
           path: entry.photos.isEmpty ? null : entry.photos[photo],
+          crop: entry.photoCrops.isEmpty ? null : entry.photoCrops[photo],
           width: double.infinity,
           height: 265,
         ),
         const SizedBox(height: 22),
-        Text(
-          '${entry.date}    ${entry.meal}',
-          style: const TextStyle(color: muted, fontSize: 12),
-        ),
+        Text(entry.date, style: const TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 10),
         Text(
           entry.title,
@@ -1124,6 +1378,9 @@ class _DiaryPageState extends State<DiaryPage> {
                       child: DishPhoto(
                         api: widget.api,
                         path: entry.photos[i],
+                        crop: entry.photoCrops.length > i
+                            ? entry.photoCrops[i]
+                            : null,
                         width: 78,
                         height: 78,
                       ),
@@ -1231,6 +1488,77 @@ class _RecipePageState extends State<RecipePage> {
     }
   }
 
+  Future<void> uploadPhotos() async {
+    setState(() => busy = true);
+    var added = 0;
+    try {
+      final selected = await ImageUpload.pick(
+        context,
+        source: ImageSource.gallery,
+      );
+      for (final image in selected) {
+        await widget.api.uploadRecipe(recipe.id, image.file, crop: image.crop);
+        added++;
+      }
+      if (mounted && added > 0) toast(context, '照片已上传，可点击照片设置封面');
+    } catch (e) {
+      if (mounted) toast(context, e);
+    } finally {
+      if (added > 0) {
+        try {
+          final all = await widget.api.request('GET', '/recipes') as List;
+          final updated = Recipe(all.firstWhere((r) => r['id'] == recipe.id));
+          if (mounted) {
+            setState(() {
+              recipe = updated;
+              photos = List<dynamic>.from(updated.photos);
+              coverMediaId = updated.coverMediaId;
+            });
+          }
+        } catch (e) {
+          if (mounted) toast(context, e);
+        }
+      }
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> removeRecipe() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除这道菜谱？'),
+        content: const Text('菜谱和它的归档关系会被永久删除，日记中的原照片会保留。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              '永久删除',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    setState(() => busy = true);
+    try {
+      await widget.api.request('DELETE', '/recipes/${recipe.id}');
+      if (mounted) {
+        toast(context, '菜谱已永久删除');
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) toast(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = recipe;
@@ -1238,6 +1566,13 @@ class _RecipePageState extends State<RecipePage> {
       appBar: AppBar(
         title: const Text('今日菜谱'),
         actions: [
+          IconButton(
+            tooltip: '删除菜谱',
+            onPressed: widget.offline || busy || !recipe.custom
+                ? null
+                : removeRecipe,
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          ),
           IconButton(
             tooltip: '编辑菜谱',
             onPressed: widget.offline || busy
@@ -1250,7 +1585,11 @@ class _RecipePageState extends State<RecipePage> {
                       ),
                     );
                     if (result != null && mounted) {
-                      setState(() => recipe = result);
+                      setState(() {
+                        recipe = result;
+                        photos = List<dynamic>.from(result.photos);
+                        coverMediaId = result.coverMediaId;
+                      });
                     }
                   },
             icon: const Icon(Icons.edit_outlined),
@@ -1272,12 +1611,16 @@ class _RecipePageState extends State<RecipePage> {
             DishPhoto(
               api: widget.api,
               path: photos.firstWhere((p) => p['id'] == coverMediaId)['url'],
+              crop: cropFromMedia(
+                photos.firstWhere((p) => p['id'] == coverMediaId),
+              ),
               height: 260,
             )
           else
             DishPhoto(
               api: widget.api,
               path: photos.isEmpty ? null : photos.last['url'] as String,
+              crop: photos.isEmpty ? null : cropFromMedia(photos.last),
               height: 260,
             ),
           const SizedBox(height: 24),
@@ -1289,16 +1632,24 @@ class _RecipePageState extends State<RecipePage> {
           Text(r.description, style: const TextStyle(color: muted)),
           const SizedBox(height: 14),
           Align(alignment: Alignment.centerLeft, child: Tag(r.category)),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: widget.offline || busy ? null : uploadPhotos,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: Text(busy ? '正在处理…' : '上传菜谱图片'),
+          ),
           if (photos.isNotEmpty) ...[
             const SizedBox(height: 20),
-            label('做过的照片'),
+            label('菜谱照片（点击设为封面）'),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: photos
                   .map(
                     (p) => InkWell(
-                      onTap: widget.offline ? null : () => selectCover(p['id']),
+                      onTap: widget.offline || busy
+                          ? null
+                          : () => selectCover(p['id']),
                       child: Stack(
                         children: [
                           DishPhoto(
@@ -1404,6 +1755,32 @@ class _NewRecipePageState extends State<NewRecipePage> {
       steps = TextEditingController();
   String category = '家常菜';
   bool busy = false;
+  final List<XFile> files = [];
+  final List<Uint8List> previews = [];
+  final List<Rect> fileCrops = [];
+  int uploaded = 0;
+  String? savedId;
+
+  Future<void> pickPhotos() async {
+    try {
+      final selected = await ImageUpload.pick(
+        context,
+        source: ImageSource.gallery,
+        max: 9 - files.length,
+      );
+      for (final image in selected) {
+        if (!mounted) return;
+        setState(() {
+          files.add(image.file);
+          previews.add(image.bytes);
+          fileCrops.add(image.crop);
+        });
+      }
+    } catch (e) {
+      if (mounted) toast(context, e);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1435,8 +1812,10 @@ class _NewRecipePageState extends State<NewRecipePage> {
     setState(() => busy = true);
     try {
       final result = await widget.api.request(
-        widget.recipe == null ? 'POST' : 'PATCH',
-        widget.recipe == null ? '/recipes' : '/recipes/${widget.recipe!.id}',
+        savedId == null && widget.recipe == null ? 'POST' : 'PATCH',
+        savedId == null && widget.recipe == null
+            ? '/recipes'
+            : '/recipes/${savedId ?? widget.recipe!.id}',
         {
           'title': title.text.trim(),
           'description': description.text.trim(),
@@ -1451,9 +1830,20 @@ class _NewRecipePageState extends State<NewRecipePage> {
               .toList(),
         },
       );
+      savedId = result['id'] as String;
+      while (uploaded < files.length) {
+        await widget.api.uploadRecipe(
+          savedId!,
+          files[uploaded],
+          crop: fileCrops[uploaded],
+        );
+        uploaded++;
+      }
+      final all = await widget.api.request('GET', '/recipes') as List;
+      final updated = all.firstWhere((r) => r['id'] == savedId);
       if (mounted) {
         toast(context, widget.recipe == null ? '拿手菜已经收进菜谱 ♥' : '菜谱已更新');
-        Navigator.pop(context, Recipe(result));
+        Navigator.pop(context, Recipe(updated));
       }
     } catch (e) {
       if (mounted) toast(context, e);
@@ -1467,6 +1857,74 @@ class _NewRecipePageState extends State<NewRecipePage> {
     appBar: AppBar(title: Text(widget.recipe == null ? '我的拿手菜' : '编辑菜谱')),
     body: PageBody(
       children: [
+        label('菜谱图片'),
+        if (widget.recipe != null && widget.recipe!.photos.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: widget.recipe!.photos
+                .map(
+                  (p) => DishPhoto(
+                    api: widget.api,
+                    path: p['url'],
+                    width: 76,
+                    height: 76,
+                  ),
+                )
+                .toList(),
+          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: previews
+              .asMap()
+              .entries
+              .map(
+                (p) => Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        p.value,
+                        width: 90,
+                        height: 90,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    if (p.key >= uploaded)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: IconButton.filledTonal(
+                          tooltip: '移除图片',
+                          onPressed: busy
+                              ? null
+                              : () => setState(() {
+                                  files.removeAt(p.key);
+                                  previews.removeAt(p.key);
+                                  fileCrops.removeAt(p.key);
+                                }),
+                          icon: const Icon(Icons.close, size: 16),
+                        ),
+                      ),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: busy || files.length >= 9 ? null : pickPhotos,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: const Text('选择菜谱图片'),
+          ),
+        ),
+        const Text(
+          '支持 JPEG、PNG、WebP、GIF，单张不超过 20 MB',
+          style: TextStyle(color: muted, fontSize: 12),
+        ),
+        const SizedBox(height: 24),
         label('菜谱名称'),
         TextField(
           controller: title,

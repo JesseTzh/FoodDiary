@@ -21,6 +21,34 @@ void main() {
     return api;
   }
 
+  test('recipe photos persist without a diary and support covers', () async {
+    final api = await mockApi();
+    final recipe = await api.request('POST', '/recipes', {
+      'title': '番茄炒蛋',
+      'category': '家常菜',
+      'description': '',
+      'ingredients': ['番茄', '鸡蛋'],
+      'steps': ['炒熟'],
+    });
+    final file = XFile.fromData(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+      ),
+      name: 'dish.png',
+    );
+    await api.uploadRecipe(recipe['id'], file);
+    await api.uploadRecipe(recipe['id'], file);
+    final restored = await mockApi();
+    final recipes = await restored.request('GET', '/recipes') as List;
+    final photos = recipes.single['photos'] as List;
+    expect(photos, hasLength(1));
+    expect(recipes.single['cover_media_id'], photos.single['id']);
+    final entries = await restored.request('GET', '/entries');
+    expect(entries['items'], isEmpty);
+    await restored.request('DELETE', '/recipes/${recipe['id']}');
+    expect(await restored.request('GET', '/recipes'), isEmpty);
+  });
+
   test(
     'upgrading mock presets preserves personal recipes and diary records',
     () async {

@@ -8,6 +8,7 @@ import 'data/models.dart';
 import 'ui/theme.dart';
 import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
+import 'version.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -354,7 +355,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                       Text(
                         navLabels[i],
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
                           color: tab == i ? orange : muted,
                         ),
                       ),
@@ -653,7 +655,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${int.parse(e.date.substring(5, 7))}月${int.parse(e.date.substring(8))}日    ${e.meal}',
+                    '${int.parse(e.date.substring(5, 7))}月${int.parse(e.date.substring(8))}日',
                     style: const TextStyle(color: muted, fontSize: 11),
                   ),
                   const SizedBox(height: 6),
@@ -880,6 +882,10 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         ],
       ),
       const SizedBox(height: 30),
+      const Center(
+        child: Text(appVersion, style: TextStyle(color: muted, fontSize: 11)),
+      ),
+      const SizedBox(height: 18),
       CozyCard(
         padding: EdgeInsets.zero,
         child: Column(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fooddiary/data/api.dart';
+import 'package:fooddiary/data/models.dart';
 import 'package:fooddiary/ui/pages.dart';
 import 'package:fooddiary/ui/theme.dart';
 
@@ -12,7 +13,25 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final api = Api(mock: true);
     await api.init();
-    await tester.pumpWidget(MaterialApp(home: RecordPage(api: api)));
+    final entry = Diary({
+      'id': 'test-entry',
+      'title': '测试晚餐',
+      'cooked_on': '2026-10-14',
+      'notes': '',
+      'category': '家常菜',
+      'tags': <String>[],
+      'media': <dynamic>[],
+      'dishes': [
+        {'id': 'dish-1', 'title': '测试晚餐'},
+      ],
+      'mood': 0,
+      'version': 1,
+      'rating': 0,
+      'favorite': false,
+    });
+    await tester.pumpWidget(
+      MaterialApp(home: RecordPage(api: api, entry: entry)),
+    );
     await tester.pumpAndSettle();
     final input = find.byWidgetPredicate(
       (w) => w is TextField && w.decoration?.hintText == '添加自定义标签',

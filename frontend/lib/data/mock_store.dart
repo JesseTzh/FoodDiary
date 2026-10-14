@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show Rect;
 
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -141,6 +142,7 @@ class MockStore {
         });
         result = entry;
       } else if (parts.length == 2 && method == 'DELETE') {
+        (entry['media'] as List? ?? <dynamic>[]).clear();
         entries.remove(entry);
         result = {'ok': true};
       } else if (parts.length == 3 &&
@@ -188,6 +190,17 @@ class MockStore {
         recipe[key] = data[key];
       }
       result = recipe;
+    } else if (parts.length == 2 &&
+        parts[0] == 'recipes' &&
+        method == 'DELETE') {
+      final recipe = _find(recipes, parts[1]);
+      recipes.remove(recipe);
+      for (final entry in entries) {
+        for (final media in (entry['media'] as List? ?? <dynamic>[])) {
+          if (media['recipe_id'] == parts[1]) media['recipe_id'] = null;
+        }
+      }
+      result = {'id': parts[1]};
     } else if (parts.length == 3 &&
         parts[0] == 'recipes' &&
         parts[2] == 'favorite' &&
@@ -258,10 +271,17 @@ class MockStore {
     return dishes;
   }
 
-  Future<void> upload(String id, XFile file, {String? recipeId}) async {
+  Future<void> upload(
+    String id,
+    XFile file, {
+    String? recipeId,
+    Rect? crop,
+  }) async {
     if (state['authenticated'] != true) throw ApiError(401, '请先登录');
-    final media = _find(entries, id)['media'] as List;
-    if (media.length >= 9) throw ApiError(400, '最多可以保存 9 张照片');
+    final directRecipe = id.isEmpty ? _find(recipes, recipeId!) : null;
+    final media = directRecipe == null
+        ? _find(entries, id)['media'] as List
+        : (directRecipe['photos'] ??= <dynamic>[]) as List;
     final bytes = await file.readAsBytes();
     if (bytes.length > 20 * 1024 * 1024) throw ApiError(400, '单张照片不能超过 20 MB');
     final png = bytes.length >= 8 && bytes[0] == 137 && bytes[1] == 80;
@@ -282,15 +302,42 @@ class MockStore {
         : gif
         ? 'gif'
         : 'webp';
+    final encoded = 'data:image/$type;base64,${base64Encode(bytes)}';
+    Map? duplicate;
+    for (final item in media) {
+      if (item['url'] == encoded) {
+        duplicate = item;
+        break;
+      }
+    }
+    if (duplicate != null) {
+      if (recipeId != null) {
+        duplicate['recipe_id'] = recipeId;
+        final recipe = _find(recipes, recipeId);
+        final photos = (recipe['photos'] ??= <dynamic>[]) as List;
+        if (!photos.any((p) => p['id'] == duplicate!['id'])) {
+          photos.add(duplicate);
+        }
+        recipe['cover_media_id'] = duplicate['id'];
+      }
+      await _save();
+      return;
+    }
+    if (media.length >= 9) throw ApiError(400, '最多可以保存 9 张照片');
+    final c = crop ?? const Rect.fromLTWH(0, 0, 1, 1);
     media.add({
       'id': _id(),
-      'url': 'data:image/$type;base64,${base64Encode(bytes)}',
+      'url': encoded,
       'recipe_id': recipeId,
+      'crop_x': c.left,
+      'crop_y': c.top,
+      'crop_width': c.width,
+      'crop_height': c.height,
     });
     if (recipeId != null) {
       final recipe = recipes.cast<Map>().firstWhere((r) => r['id'] == recipeId);
       final recipePhotos = (recipe['photos'] as List? ?? <dynamic>[]);
-      recipePhotos.add(media.last);
+      if (directRecipe == null) recipePhotos.add(media.last);
       recipe['photos'] = recipePhotos;
       recipe['cover_media_id'] = media.last['id'];
     }
