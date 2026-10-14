@@ -1,22 +1,16 @@
 import { chromium, expect as playwrightExpect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { layouts, pages } from './mock-page-catalog.mjs';
 
 const expect = playwrightExpect.configure({ timeout: 30_000 });
 const artifacts = resolve(process.env.CI_ARTIFACTS_DIR || 'mock-page-artifacts');
 const baseURL = process.env.CI_BASE_URL || 'http://127.0.0.1:18081';
 const browser = await chromium.launch({ headless: true });
-const requiredPages = [
-  'home', 'record', 'diary', 'diary-detail', 'diary-edit', 'diary-delete',
-  'cookbook', 'recipe-detail', 'recipe-record', 'recipe-new', 'mine',
-  'favorites', 'my-recipes', 'settings', 'login', 'setup',
-];
+const requiredPages = pages.map(page => page.id);
 
 try {
-  for (const [layout, viewport] of Object.entries({
-    mobile: { width: 390, height: 844 },
-    desktop: { width: 1440, height: 1080 },
-  })) {
+  for (const [layout, viewport] of Object.entries(layouts)) {
     const directory = resolve(artifacts, layout);
     await mkdir(directory, { recursive: true });
     const context = await browser.newContext({

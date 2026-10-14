@@ -1,5 +1,27 @@
 # 开发说明
 
+## 环境与启动
+
+项目使用 Flutter 3.47.7、Dart 3.13 和 Go 1.26。安装 Flutter 依赖并启动前后端：
+
+```sh
+cd frontend
+flutter pub get
+cd ..
+make dev
+```
+
+API 地址是 `http://localhost:8080`，Web 地址是 `http://localhost:5173`。首次访问时设置厨房密码。Web 使用 HttpOnly Cookie；Android 使用本机安全存储的会话令牌。
+
+Android 模拟器可使用以下命令连接本机 API：
+
+```sh
+cd frontend
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
+```
+
+正式 Android 包只允许 HTTPS。debug 和 profile 包可连接 HTTP 开发服务。
+
 ## 结构
 
 ```text
@@ -51,7 +73,7 @@ scripts/build-pwa.py             根据实际构建资源生成版本化离线�
 
 Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在路径 `/api/v1/auth` 的 `fooddiary_refresh` HttpOnly Cookie；刷新接口无需有效访问 JWT。Android 登录、刷新请求必须带 `X-FoodDiary-Client: app`，响应 `X-Session-Token` 和 `X-Refresh-Token` 分别提供访问和刷新令牌，存入 flutter_secure_storage；业务请求使用访问 JWT 的 `Authorization: Bearer <token>`，刷新和退出则使用刷新令牌。浏览器响应不暴露令牌头。
 
-浏览器写请求（包括登录）要求 Origin 与同源或 CORS 白名单匹配；没有 Origin 的原生请求要求 `X-FoodDiary-Client: app`。客户端遇到访问 JWT 过期会自动刷新并重试一次，并合并同一 Api 实例的并发刷新。升级迁移清除旧会话；旧版客户端需升级并重新登录。签名密钥配置、HTTPS 和反向代理注意事项见 README。
+浏览器写请求（包括登录）要求 Origin 与同源或 CORS 白名单匹配；没有 Origin 的原生请求要求 `X-FoodDiary-Client: app`。客户端遇到访问 JWT 过期会自动刷新并重试一次，并合并同一 Api 实例的并发刷新。升级迁移清除旧会话；旧版客户端需升级并重新登录。
 
 日记写入示例：
 
@@ -83,15 +105,34 @@ API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON�
 
 离线模式仅支持浏览日记和菜谱，不支持新增、编辑或收藏；应用启动、手动刷新及「重试」会重新连接。
 
+## 配置和数据保护
+
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `FOODDIARY_ADDR` | `:8080` | 监听地址 |
+| `FOODDIARY_DATA_DIR` | `./data` | SQLite、照片和签名密钥目录 |
+| `FOODDIARY_FRONTEND_DIR` | `frontend/build/web` | Web 构建目录 |
+| `FOODDIARY_PASSWORD` | 空 | 启动时设置或更改厨房密码 |
+| `FOODDIARY_JWT_SECRET` | 自动生成并保存到 `data/jwt.key` | 至少 32 字节的十六进制 HS256 密钥 |
+| `FOODDIARY_CORS_ORIGINS` | 空 | 逗号分隔的跨域来源白名单 |
+
+更改厨房密码会撤销所有会话。相同密码下重启服务不会撤销会话。更改 JWT 密钥会使旧 JWT 失效。备份时请包含数据库、照片和 `jwt.key`。多实例部署必须共享同一数据库和签名密钥。
+
+生产环境必须使用 HTTPS。反向代理应覆盖客户端提供的 `X-Forwarded-Proto`，并保留原始 Host。登录限速按直连 IP 计算；应用不信任外部 `X-Forwarded-For`。代理后的用户可能共用一个限速计数。不要把不可信来源加入 CORS 白名单。
+
+Web 使用 HttpOnly、SameSite=Lax Cookie；HTTPS 下 Cookie 带 Secure 标记。写请求会检查 Origin。Android 使用安全存储，并发送 `X-FoodDiary-Client: app`。
+
 ## Android
 
 `com.jessetzh.fooddiary`，主清单声明网络权限，相机和相册通过 image_picker 接入。正式包使用 HTTPS；debug/profile 可使用 HTTP 开发服务器。服务地址通过 `--dart-define=API_BASE_URL=...` 设置。
 
-构建命令请使用 README 中的 `make apk` / `make appbundle`。正式签名读取 `android/key.properties`，文件和 keystore 均被忽略。无配置时使用开发签名。
+构建命令请使用根目录的 `make apk` / `make appbundle`。正式签名读取 `frontend/android/key.properties`，文件和 keystore 均被忽略。无配置时使用开发签名。正式签名时复制 `frontend/android/key.properties.example` 并填写自己的 keystore 信息。不要提交签名文件、密钥或密码。
 
 ## 验证和发布
 
 `make check` 执行 Go vet 和 Flutter analyze；`make build` 生成后端与 PWA；`make apk` 生成 APK。修改 Web 后必须重新执行构建脚本，确保离线资源版本与页面一致。
+
+Web 构建必须运行 `make web` 或 `./scripts/build-web.sh`。脚本会在 Flutter 构建后生成 Service Worker。构建使用本地 CanvasKit 和中文字体，不要添加 `--wasm`。
 
 生产反向代理需放行 `.wasm`、字体与 `/media/`，保留服务器返回的 WASM MIME。`index.html`、`flutter_bootstrap.js` 和 `sw.js` 不应被代理长时间缓存。数据库和照片统一备份 `FOODDIARY_DATA_DIR`，不要把该目录放进镜像。
 

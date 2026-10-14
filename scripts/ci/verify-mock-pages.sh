@@ -13,3 +13,4 @@ for attempt in {1..30}; do
 done
 curl --fail --silent http://127.0.0.1:18081/ >/dev/null
 CI_BASE_URL=http://127.0.0.1:18081 CI_ARTIFACTS_DIR="$ARTIFACTS" node scripts/ci/web/mock-pages.mjs
+CI_ARTIFACTS_DIR="$ARTIFACTS" GALLERY_SHA="$(git rev-parse HEAD)" node scripts/ci/web/build-mock-gallery.mjs
