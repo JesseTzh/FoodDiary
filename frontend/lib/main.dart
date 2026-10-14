@@ -295,6 +295,9 @@ class _KitchenState extends State<Kitchen> {
     ),
     child: SafeArea(
       top: false,
+      // Mobile browsers may report no inset for the gesture area.
+      minimum: const EdgeInsets.only(bottom: 34),
+      maintainBottomViewPadding: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -26,6 +28,14 @@ class DishPhoto extends StatelessWidget {
       height: height,
       child: path == null
           ? placeholder()
+          : api.mock && path!.startsWith('asset:')
+          ? Image.asset(path!.substring(6), fit: BoxFit.cover)
+          : api.mock && path!.startsWith('data:')
+          ? Image.memory(
+              base64Decode(path!.split(',').last),
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => placeholder(),
+            )
           : Image.network(
               api.url(path!),
               headers: kIsWeb ? null : api.headers,

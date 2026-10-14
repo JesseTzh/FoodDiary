@@ -6,12 +6,17 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'mock_store.dart';
+
 import 'client_stub.dart' if (dart.library.js_interop) 'client_web.dart';
 
 class Api {
   static const configuredBase = String.fromEnvironment('API_BASE_URL');
   final http.Client client;
-  Api({http.Client? client}) : client = client ?? makeClient();
+  final bool mock;
+  MockStore? _mockStore;
+  Api({http.Client? client, this.mock = const bool.fromEnvironment('MOCK_API')})
+    : client = client ?? makeClient();
   late SharedPreferences prefs;
   String base = '';
   String token = '';
@@ -24,6 +29,11 @@ class Api {
     base = configuredBase.isNotEmpty
         ? configuredBase
         : (kIsWeb ? Uri.base.origin : 'http://10.0.2.2:8080');
+    if (mock) {
+      base = 'mock://local';
+      _mockStore = MockStore(prefs);
+      return;
+    }
     // Legacy plaintext credentials are intentionally invalidated by the upgrade.
     await prefs.remove('session');
     if (!kIsWeb) {
@@ -118,6 +128,7 @@ class Api {
   }
 
   Future<dynamic> request(String method, String path, [Object? body]) async {
+    if (mock) return _mockStore!.request(method, path, body);
     final canRefresh = !path.startsWith('/auth/') || path == '/auth/status';
     if (canRefresh) await _ensureAccess();
     final generation = _tokenGeneration;
@@ -143,6 +154,7 @@ class Api {
   }
 
   Future<void> upload(String id, XFile file) async {
+    if (mock) return _mockStore!.upload(id, file);
     await _ensureAccess();
     final bytes = await file.readAsBytes();
     Future<http.Response> send() async {
@@ -184,6 +196,10 @@ class Api {
   }
 
   Future<void> logout() async {
+    if (mock) {
+      await _mockStore!.request('POST', '/auth/logout');
+      return;
+    }
     if (_refreshing != null) await _refreshing;
     final req = http.Request('POST', Uri.parse(url('/api/v1/auth/logout')));
     if (!kIsWeb) {
