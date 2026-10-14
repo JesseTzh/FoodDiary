@@ -115,35 +115,7 @@ class MockStore {
       return _copy({'items': items, 'total': items.length});
     } else if (path == '/entries' && method == 'POST') {
       _entry(data);
-      final dishes = List<Map<String, dynamic>>.from(data['dishes'] ?? []);
-      for (final dish in dishes) {
-        Map? found;
-        for (final recipe in recipes) {
-          if (recipe['title'].toString().toLowerCase() ==
-              dish['title'].toString().toLowerCase()) {
-            found = recipe;
-            break;
-          }
-        }
-        if (found != null) {
-          dish['id'] = found['id'];
-        } else {
-          dish['id'] = _id();
-          recipes.insert(0, {
-            'id': dish['id'],
-            'title': dish['title'],
-            'category': data['category'] ?? '家常菜',
-            'description': '',
-            'image': '',
-            'ingredients': [],
-            'steps': [],
-            'favorite': false,
-            'custom': true,
-            'photos': <dynamic>[],
-            'cover_media_id': '',
-          });
-        }
-      }
+      final dishes = _resolveDishes(data);
       result = {
         ...data,
         'dishes': dishes,
@@ -165,6 +137,7 @@ class MockStore {
           ...data,
           'id': entry['id'],
           'version': entry['version'] + 1,
+          'dishes': _resolveDishes(data),
         });
         result = entry;
       } else if (parts.length == 2 && method == 'DELETE') {
@@ -195,6 +168,26 @@ class MockStore {
         'favorite': false,
       };
       recipes.insert(0, result);
+    } else if (parts.length == 2 &&
+        parts[0] == 'recipes' &&
+        method == 'PATCH') {
+      _text(data['title'], 80);
+      for (final key in ['ingredients', 'steps']) {
+        if (data[key] is! List || (data[key] as List).length > 100) {
+          throw ApiError(400, '食材和步骤各最多 100 项');
+        }
+      }
+      final recipe = _find(recipes, parts[1]);
+      for (final key in [
+        'title',
+        'category',
+        'description',
+        'ingredients',
+        'steps',
+      ]) {
+        recipe[key] = data[key];
+      }
+      result = recipe;
     } else if (parts.length == 3 &&
         parts[0] == 'recipes' &&
         parts[2] == 'favorite' &&
@@ -228,6 +221,41 @@ class MockStore {
     }
     await _save();
     return _copy(result);
+  }
+
+  List<Map<String, dynamic>> _resolveDishes(Map<String, dynamic> data) {
+    final dishes = List<Map<String, dynamic>>.from(data['dishes'] ?? []);
+    for (final dish in dishes) {
+      Map? found;
+      for (final recipe in recipes) {
+        if (recipe['id'] == dish['id'] ||
+            recipe['title'].toString().toLowerCase() ==
+                dish['title'].toString().toLowerCase()) {
+          found = recipe;
+          break;
+        }
+      }
+      if (found != null) {
+        dish['id'] = found['id'];
+        dish['title'] = found['title'];
+      } else {
+        dish['id'] = _id();
+        recipes.insert(0, {
+          'id': dish['id'],
+          'title': dish['title'],
+          'category': data['category'] ?? '家常菜',
+          'description': '',
+          'image': '',
+          'ingredients': [],
+          'steps': [],
+          'favorite': false,
+          'custom': true,
+          'photos': <dynamic>[],
+          'cover_media_id': '',
+        });
+      }
+    }
+    return dishes;
   }
 
   Future<void> upload(String id, XFile file, {String? recipeId}) async {

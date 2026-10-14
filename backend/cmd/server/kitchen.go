@@ -25,6 +25,7 @@ type Recipe struct {
 func (a *App) kitchenRoutes(r chi.Router) {
 	r.Get("/recipes", a.recipes)
 	r.Post("/recipes", a.saveRecipe)
+	r.Patch("/recipes/{id}", a.saveRecipe)
 	r.Patch("/recipes/{id}/favorite", a.recipeFavorite)
 	r.Patch("/recipes/{id}/cover", a.recipeCover)
 	r.Patch("/entries/{id}/favorite", a.entryFavorite)
@@ -110,6 +111,23 @@ func (a *App) saveRecipe(w http.ResponseWriter, r *http.Request) {
 	x.Image = ""
 	ij, _ := json.Marshal(x.Ingredients)
 	sj, _ := json.Marshal(x.Steps)
+	if r.Method == http.MethodPatch {
+		x.ID = chi.URLParam(r, "id")
+		res, e := a.db.Exec("UPDATE recipes SET title=?,category=?,description=?,ingredients_json=?,steps_json=? WHERE id=?", strings.TrimSpace(x.Title), x.Category, x.Description, ij, sj, x.ID)
+		if e != nil {
+			errJSON(w, 500, "DB", e.Error())
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			errJSON(w, 404, "NOT_FOUND", "未找到菜谱")
+			return
+		}
+		a.db.QueryRow("SELECT favorite,custom,image,cover_media_id FROM recipes WHERE id=?", x.ID).Scan(&x.Favorite, &x.Custom, &x.Image, &x.CoverMediaID)
+		x.Title = strings.TrimSpace(x.Title)
+		x.Photos = a.recipeMedia(x.ID)
+		writeJSON(w, 200, x)
+		return
+	}
 	if _, e := a.db.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,?,?,?,?,?,?,'')", x.ID, x.Title, x.Category, x.Description, x.Image, ij, sj, x.Favorite, x.Custom); e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,115 @@ import 'package:image_picker/image_picker.dart';
 import '../data/api.dart';
 import '../data/models.dart';
 import 'theme.dart';
+
+/// Reads the capture date stored in common image metadata.
+///
+/// Camera photos usually store this in JPEG EXIF DateTimeOriginal. The text
+/// fallback also handles PNG comments and exports from apps that preserve the
+/// date as an ISO-like string.
+DateTime? imageDateFromBytes(Uint8List bytes) {
+  final exifDate = _jpegExifDate(bytes);
+  if (exifDate != null) return exifDate;
+  final text = String.fromCharCodes(bytes.where((b) => b >= 32 && b <= 126));
+  final match = RegExp(
+    r'(20\d{2})[:\-](\d{2})[:\-](\d{2})(?:[ T](\d{2})[:\-](\d{2})(?::(\d{2}))?)?',
+  ).firstMatch(text);
+  if (match == null) return null;
+  return _validDate(
+    int.parse(match.group(1)!),
+    int.parse(match.group(2)!),
+    int.parse(match.group(3)!),
+  );
+}
+
+DateTime? _jpegExifDate(Uint8List bytes) {
+  if (bytes.length < 4 || bytes[0] != 0xff || bytes[1] != 0xd8) return null;
+  var offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] != 0xff) {
+      offset++;
+      continue;
+    }
+    final marker = bytes[offset + 1];
+    offset += 2;
+    if (marker == 0xda || marker == 0xd9) break;
+    if (offset + 2 > bytes.length) break;
+    final length = (bytes[offset] << 8) | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) break;
+    if (marker == 0xe1 &&
+        length >= 8 &&
+        String.fromCharCodes(bytes.sublist(offset + 2, offset + 8)) ==
+            'Exif\u0000\u0000') {
+      final result = _readExifTiff(bytes, offset + 8, offset + length);
+      if (result != null) return result;
+    }
+    offset += length;
+  }
+  return null;
+}
+
+DateTime? _readExifTiff(Uint8List bytes, int start, int end) {
+  if (start + 8 > end) return null;
+  final little = bytes[start] == 0x49 && bytes[start + 1] == 0x49;
+  if (!little && !(bytes[start] == 0x4d && bytes[start + 1] == 0x4d))
+    return null;
+  int u16(int p) =>
+      little ? bytes[p] | bytes[p + 1] << 8 : bytes[p] << 8 | bytes[p + 1];
+  int u32(int p) => little
+      ? bytes[p] | bytes[p + 1] << 8 | bytes[p + 2] << 16 | bytes[p + 3] << 24
+      : bytes[p] << 24 | bytes[p + 1] << 16 | bytes[p + 2] << 8 | bytes[p + 3];
+  if (u16(start + 2) != 42) return null;
+  DateTime? readIfd(int at, int depth) {
+    if (depth > 2 || at < start || at + 2 > end) return null;
+    final count = u16(at);
+    for (var i = 0; i < count; i++) {
+      final p = at + 2 + i * 12;
+      if (p + 12 > end) break;
+      final tag = u16(p);
+      final type = u16(p + 2);
+      final n = u32(p + 4);
+      final size = type == 2 ? n : 0;
+      final valueAt = size > 4 ? start + u32(p + 8) : p + 8;
+      if ((tag == 0x9003 || tag == 0x9004 || tag == 0x0132) &&
+          type == 2 &&
+          valueAt >= start &&
+          valueAt + size <= end) {
+        final value = String.fromCharCodes(
+          bytes.sublist(valueAt, valueAt + size),
+        );
+        final match = RegExp(r'(20\d{2})[:\-](\d{2})[:\-](\d{2})')
+            .firstMatch(value);
+        if (match != null) {
+          final parsed = _validDate(
+            int.parse(match.group(1)!),
+            int.parse(match.group(2)!),
+            int.parse(match.group(3)!),
+          );
+          if (parsed != null) return parsed;
+        }
+      }
+      if ((tag == 0x8769 || tag == 0x8825) && type == 4 && n == 1) {
+        final nested = readIfd(start + u32(p + 8), depth + 1);
+        if (nested != null) return nested;
+      }
+    }
+    return null;
+  }
+
+  return readIfd(start + u32(start + 4), 0);
+}
+
+DateTime? _validDate(int year, int month, int day) {
+  final value = DateTime.tryParse(
+    '$year-${month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}',
+  );
+  return value != null &&
+          value.year == year &&
+          value.month == month &&
+          value.day == day
+      ? value
+      : null;
+}
 
 class DishPhoto extends StatelessWidget {
   final Api api;
@@ -238,6 +348,7 @@ class _RecordPageState extends State<RecordPage> {
   final List<Uint8List> previews = [];
   final List<Map<String, dynamic>> dishes = [];
   List<Recipe> recipes = [];
+  bool showCustomTag = false;
   bool saving = false;
   String? savedId;
   int uploaded = 0;
@@ -286,6 +397,7 @@ class _RecordPageState extends State<RecordPage> {
     setState(() {
       tags.add(value);
       customTag.clear();
+      showCustomTag = false;
     });
   }
 
@@ -303,6 +415,7 @@ class _RecordPageState extends State<RecordPage> {
           : await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85);
       final room = 9 - (widget.entry?.photos.length ?? 0) - files.length;
       final incoming = selected.whereType<XFile>().take(room).toList();
+      DateTime? suggestedDate;
       for (final f in incoming) {
         final data = await f.readAsBytes();
         if (data.length > 20 * 1024 * 1024) {
@@ -313,8 +426,33 @@ class _RecordPageState extends State<RecordPage> {
           setState(() {
             files.add(f);
             previews.add(data);
-            fileDishIndices.add(photoDishIndex);
+            fileDishIndices.add(photoDishIndex.clamp(0, dishes.length - 1));
           });
+        }
+        suggestedDate ??= imageDateFromBytes(data);
+      }
+      if (suggestedDate != null && !_sameDay(suggestedDate!, date) && mounted) {
+        final useImageDate = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('发现照片日期'),
+            content: Text(
+              '照片信息显示拍摄日期为 ${suggestedDate!.toIso8601String().substring(0, 10)}，与当前做饭日期不同。要使用照片日期吗？',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('继续使用当前日期'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('使用照片日期'),
+              ),
+            ],
+          ),
+        );
+        if (useImageDate == true && mounted) {
+          setState(() => date = suggestedDate!);
         }
       }
       if (selected.length > room && mounted) toast(context, '最多可以保存 9 张照片');
@@ -322,6 +460,9 @@ class _RecordPageState extends State<RecordPage> {
       if (mounted) toast(context, e);
     }
   }
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
 
   Future<void> save() async {
     if (!form.currentState!.validate()) return;
@@ -408,26 +549,27 @@ class _RecordPageState extends State<RecordPage> {
                         style: TextStyle(fontSize: 11, color: muted),
                       ),
                       const SizedBox(height: 12),
-                      if (dishes.length > 1)
-                        DropdownButton<int>(
-                          value: photoDishIndex.clamp(0, dishes.length - 1),
-                          onChanged: savedId != null
-                              ? null
-                              : (v) {
-                                  if (v != null) {
-                                    setState(() => photoDishIndex = v);
-                                  }
-                                },
-                          items: [
-                            for (var i = 0; i < dishes.length; i++)
-                              DropdownMenuItem(
-                                value: i,
-                                child: Text(
-                                  '照片归属：${dishes[i]['title'].toString().isEmpty ? '第 ${i + 1} 道菜' : dishes[i]['title']}',
-                                ),
+                      DropdownButton<int>(
+                        isExpanded: true,
+                        value: photoDishIndex.clamp(0, dishes.length - 1),
+                        onChanged: savedId != null
+                            ? null
+                            : (v) {
+                                if (v != null) {
+                                  setState(() => photoDishIndex = v);
+                                }
+                              },
+                        items: [
+                          for (var i = 0; i < dishes.length; i++)
+                            DropdownMenuItem(
+                              value: i,
+                              child: Text(
+                                '照片归属：${dishes[i]['title'].toString().isEmpty ? '第 ${i + 1} 道菜' : dishes[i]['title']}',
+                                overflow: TextOverflow.ellipsis,
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
+                      ),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -468,36 +610,72 @@ class _RecordPageState extends State<RecordPage> {
                                 height: 76,
                               ),
                             for (var i = 0; i < previews.length; i++)
-                              Stack(
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.memory(
-                                      previews[i],
-                                      width: 76,
-                                      height: 76,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                  if (savedId == null)
-                                    Positioned(
-                                      top: -8,
-                                      right: -8,
-                                      child: IconButton(
-                                        onPressed: saving
-                                            ? null
-                                            : () => setState(() {
-                                                files.removeAt(i);
-                                                previews.removeAt(i);
-                                                fileDishIndices.removeAt(i);
-                                              }),
-                                        icon: const Icon(
-                                          Icons.cancel,
-                                          color: ink,
-                                          size: 20,
+                                  Stack(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.memory(
+                                          previews[i],
+                                          width: 76,
+                                          height: 76,
+                                          fit: BoxFit.cover,
                                         ),
                                       ),
+                                      if (savedId == null)
+                                        Positioned(
+                                          top: -8,
+                                          right: -8,
+                                          child: IconButton(
+                                            onPressed: saving
+                                                ? null
+                                                : () => setState(() {
+                                                    files.removeAt(i);
+                                                    previews.removeAt(i);
+                                                    fileDishIndices.removeAt(i);
+                                                  }),
+                                            icon: const Icon(
+                                              Icons.cancel,
+                                              color: ink,
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  SizedBox(
+                                    width: 130,
+                                    child: DropdownButton<int>(
+                                      isExpanded: true,
+                                      value: fileDishIndices[i],
+                                      onChanged: saving || savedId != null
+                                          ? null
+                                          : (v) {
+                                              if (v != null) {
+                                                setState(
+                                                  () => fileDishIndices[i] = v,
+                                                );
+                                              }
+                                            },
+                                      items: [
+                                        for (var d = 0; d < dishes.length; d++)
+                                          DropdownMenuItem(
+                                            value: d,
+                                            child: Text(
+                                              dishes[d]['title']
+                                                      .toString()
+                                                      .trim()
+                                                      .isEmpty
+                                                  ? '第 ${d + 1} 道菜'
+                                                  : dishes[d]['title'],
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
                                     ),
+                                  ),
                                 ],
                               ),
                           ],
@@ -514,6 +692,7 @@ class _RecordPageState extends State<RecordPage> {
                       children: [
                         Expanded(
                           child: Autocomplete<Recipe>(
+                            key: ObjectKey(dishes[i]),
                             initialValue: TextEditingValue(
                               text: dishes[i]['title'] ?? '',
                             ),
@@ -526,39 +705,73 @@ class _RecordPageState extends State<RecordPage> {
                                   ),
                             displayStringForOption: (r) => r.title,
                             onSelected: (r) => setState(() {
-                              dishes[i] = {'id': r.id, 'title': r.title};
+                              dishes[i].addAll({'id': r.id, 'title': r.title});
                             }),
                             fieldViewBuilder:
-                                (context, controller, focus, submit) =>
-                                    TextFormField(
-                                      controller: controller,
-                                      focusNode: focus,
-                                      readOnly: savedId != null,
-                                      maxLength: 80,
-                                      validator: (v) =>
-                                          i == 0 &&
-                                              (v == null || v.trim().isEmpty)
-                                          ? '写下今天做的菜吧'
-                                          : null,
-                                      onChanged: (v) =>
-                                          dishes[i] = {'id': '', 'title': v},
-                                      decoration: InputDecoration(
-                                        hintText: '菜名',
-                                        counterText: '',
-                                        suffixIcon: i > 0
-                                            ? IconButton(
-                                                tooltip: '移除这道菜',
-                                                onPressed: savedId == null
-                                                    ? () => setState(
-                                                        () =>
-                                                            dishes.removeAt(i),
-                                                      )
-                                                    : null,
-                                                icon: const Icon(Icons.close),
-                                              )
-                                            : null,
-                                      ),
-                                    ),
+                                (
+                                  context,
+                                  controller,
+                                  focus,
+                                  submit,
+                                ) => TextFormField(
+                                  controller: controller,
+                                  focusNode: focus,
+                                  readOnly: savedId != null,
+                                  maxLength: 80,
+                                  validator: (v) =>
+                                      (v == null || v.trim().isEmpty)
+                                      ? '写下今天做的菜吧'
+                                      : null,
+                                  onChanged: (v) => setState(
+                                    () => dishes[i].addAll({
+                                      'id': '',
+                                      'title': v,
+                                    }),
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: '菜名',
+                                    counterText: '',
+                                    suffixIcon: i > 0
+                                        ? IconButton(
+                                            tooltip: '移除这道菜',
+                                            onPressed: savedId == null
+                                                ? () {
+                                                    if (fileDishIndices
+                                                        .contains(i)) {
+                                                      toast(
+                                                        context,
+                                                        '请先修改这道菜的照片归属或移除照片',
+                                                      );
+                                                      return;
+                                                    }
+                                                    setState(() {
+                                                      dishes.removeAt(i);
+                                                      for (
+                                                        var f = 0;
+                                                        f <
+                                                            fileDishIndices
+                                                                .length;
+                                                        f++
+                                                      ) {
+                                                        if (fileDishIndices[f] >
+                                                            i) {
+                                                          fileDishIndices[f]--;
+                                                        }
+                                                      }
+                                                      photoDishIndex =
+                                                          photoDishIndex == i
+                                                          ? 0
+                                                          : photoDishIndex > i
+                                                          ? photoDishIndex - 1
+                                                          : photoDishIndex;
+                                                    });
+                                                  }
+                                                : null,
+                                            icon: const Icon(Icons.close),
+                                          )
+                                        : null,
+                                  ),
+                                ),
                             optionsViewBuilder: (context, select, options) =>
                                 Align(
                                   alignment: Alignment.topLeft,
@@ -647,46 +860,50 @@ class _RecordPageState extends State<RecordPage> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: {...diaryTags, ...tags}
-                      .map(
-                        (t) => Tag(
-                          t,
-                          selected: tags.contains(t),
-                          onTap: savedId != null
-                              ? null
-                              : () => setState(() {
-                                  tags.contains(t)
-                                      ? tags.remove(t)
-                                      : tags.add(t);
-                                }),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 10),
-                Row(
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: customTag,
-                        readOnly: savedId != null,
-                        maxLength: 20,
-                        onSubmitted: (_) => addCustomTag(),
-                        decoration: const InputDecoration(
-                          hintText: '添加自定义标签',
-                          counterText: '',
-                          prefixIcon: Icon(Icons.edit_outlined, size: 18),
-                        ),
+                    for (final t in {...diaryTags, ...tags})
+                      Tag(
+                        t,
+                        selected: tags.contains(t),
+                        onTap: savedId != null
+                            ? null
+                            : () => setState(() {
+                                tags.contains(t) ? tags.remove(t) : tags.add(t);
+                              }),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: '添加标签',
-                      onPressed: savedId != null ? null : addCustomTag,
-                      icon: const Icon(Icons.add),
+                    Tag(
+                      '+',
+                      onTap: savedId != null
+                          ? null
+                          : () =>
+                                setState(() => showCustomTag = !showCustomTag),
                     ),
                   ],
                 ),
+                if (showCustomTag) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          autofocus: true,
+                          controller: customTag,
+                          readOnly: savedId != null,
+                          maxLength: 20,
+                          onSubmitted: (_) => addCustomTag(),
+                          decoration: const InputDecoration(
+                            hintText: '添加自定义标签',
+                            counterText: '',
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: savedId != null ? null : addCustomTag,
+                        child: const Text('添加'),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 22),
                 label('心情'),
                 Row(
@@ -973,6 +1190,7 @@ class RecipePage extends StatefulWidget {
 }
 
 class _RecipePageState extends State<RecipePage> {
+  late Recipe recipe;
   late bool favorite;
   bool busy = false;
   late List<dynamic> photos;
@@ -980,7 +1198,8 @@ class _RecipePageState extends State<RecipePage> {
   @override
   void initState() {
     super.initState();
-    favorite = widget.recipe.favorite;
+    recipe = widget.recipe;
+    favorite = recipe.favorite;
     photos = List<dynamic>.from(widget.recipe.photos);
     coverMediaId = widget.recipe.coverMediaId;
   }
@@ -1014,11 +1233,28 @@ class _RecipePageState extends State<RecipePage> {
 
   @override
   Widget build(BuildContext context) {
-    final r = widget.recipe;
+    final r = recipe;
     return Scaffold(
       appBar: AppBar(
         title: const Text('今日菜谱'),
         actions: [
+          IconButton(
+            tooltip: '编辑菜谱',
+            onPressed: widget.offline || busy
+                ? null
+                : () async {
+                    final result = await Navigator.of(context).push<Recipe>(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            NewRecipePage(api: widget.api, recipe: recipe),
+                      ),
+                    );
+                    if (result != null && mounted) {
+                      setState(() => recipe = result);
+                    }
+                  },
+            icon: const Icon(Icons.edit_outlined),
+          ),
           IconButton(
             tooltip: '收藏菜谱',
             onPressed: widget.offline || busy ? null : toggle,
@@ -1155,7 +1391,8 @@ class _RecipePageState extends State<RecipePage> {
 
 class NewRecipePage extends StatefulWidget {
   final Api api;
-  const NewRecipePage({super.key, required this.api});
+  final Recipe? recipe;
+  const NewRecipePage({super.key, required this.api, this.recipe});
   @override
   State<NewRecipePage> createState() => _NewRecipePageState();
 }
@@ -1167,6 +1404,19 @@ class _NewRecipePageState extends State<NewRecipePage> {
       steps = TextEditingController();
   String category = '家常菜';
   bool busy = false;
+  @override
+  void initState() {
+    super.initState();
+    final r = widget.recipe;
+    if (r != null) {
+      title.text = r.title;
+      description.text = r.description;
+      ingredients.text = r.ingredients.join('\n');
+      steps.text = r.steps.join('\n');
+      category = r.category;
+    }
+  }
+
   @override
   void dispose() {
     for (final c in [title, description, ingredients, steps]) {
@@ -1184,22 +1434,26 @@ class _NewRecipePageState extends State<NewRecipePage> {
     }
     setState(() => busy = true);
     try {
-      await widget.api.request('POST', '/recipes', {
-        'title': title.text.trim(),
-        'description': description.text.trim(),
-        'category': category,
-        'ingredients': ingredients.text
-            .split('\n')
-            .where((s) => s.trim().isNotEmpty)
-            .toList(),
-        'steps': steps.text
-            .split('\n')
-            .where((s) => s.trim().isNotEmpty)
-            .toList(),
-      });
+      final result = await widget.api.request(
+        widget.recipe == null ? 'POST' : 'PATCH',
+        widget.recipe == null ? '/recipes' : '/recipes/${widget.recipe!.id}',
+        {
+          'title': title.text.trim(),
+          'description': description.text.trim(),
+          'category': category,
+          'ingredients': ingredients.text
+              .split('\n')
+              .where((s) => s.trim().isNotEmpty)
+              .toList(),
+          'steps': steps.text
+              .split('\n')
+              .where((s) => s.trim().isNotEmpty)
+              .toList(),
+        },
+      );
       if (mounted) {
-        toast(context, '拿手菜已经收进菜谱 ♥');
-        Navigator.pop(context, true);
+        toast(context, widget.recipe == null ? '拿手菜已经收进菜谱 ♥' : '菜谱已更新');
+        Navigator.pop(context, Recipe(result));
       }
     } catch (e) {
       if (mounted) toast(context, e);
@@ -1210,7 +1464,7 @@ class _NewRecipePageState extends State<NewRecipePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('我的拿手菜')),
+    appBar: AppBar(title: Text(widget.recipe == null ? '我的拿手菜' : '编辑菜谱')),
     body: PageBody(
       children: [
         label('菜谱名称'),

@@ -156,6 +156,25 @@ void main() {
     final afterCover = (await api.request('GET', '/recipes') as List)
         .firstWhere((r) => r['id'] == tomato['id']);
     expect(afterCover['cover_media_id'], updated['photos'][0]['id']);
+    await api.request('PATCH', '/recipes/${tomato['id']}/favorite', {
+      'favorite': true,
+    });
+    final edited = await api.request('PATCH', '/recipes/${tomato['id']}', {
+      'title': '家常番茄炒蛋',
+      'category': '家常菜',
+      'description': '少糖',
+      'ingredients': ['番茄', '鸡蛋'],
+      'steps': ['先炒蛋'],
+    });
+    expect(edited['title'], '家常番茄炒蛋');
+    expect(edited['favorite'], true);
+    expect(edited['cover_media_id'], afterCover['cover_media_id']);
+    expect(edited['photos'], afterCover['photos']);
+    final saved = (await api.request('GET', '/recipes') as List).firstWhere(
+      (r) => r['id'] == tomato['id'],
+    );
+    expect(saved['ingredients'], ['番茄', '鸡蛋']);
+    expect(saved['steps'], ['先炒蛋']);
   });
   test(
     'mock logout and login remain isolated from production credentials',
