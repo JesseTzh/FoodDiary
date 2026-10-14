@@ -86,9 +86,22 @@ function semanticControl(identifier) {
 
 async function authenticate() {
   await expect(page.locator('[flt-semantics-identifier="login-password-prompt"]')).toBeVisible();
-  await semanticControl('login-password-input').fill(password);
+  const input = semanticControl('login-password-input');
+  await input.fill(password);
   authenticationStarted = true;
-  await page.locator('[flt-semantics-identifier="login-submit"]').click();
+  // Submitting from the native control exercises Flutter's TextField
+  // onSubmitted callback directly. Clicking the semantics wrapper can be
+  // swallowed by the web semantics layer on some Flutter releases.
+  const login = page.waitForResponse(
+    (response) => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/v1/auth/login',
+    { timeout },
+  );
+  await input.press('Enter');
+  const loginResponse = await login;
+  if (!loginResponse.ok()) {
+    throw new Error(`Login request failed with HTTP ${loginResponse.status()}`);
+  }
   await expect(page.locator('[flt-semantics-identifier="home-record-action"]')).toBeVisible();
 }
 
