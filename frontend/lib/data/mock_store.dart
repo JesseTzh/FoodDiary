@@ -56,7 +56,10 @@ class MockStore {
     final data = Map<String, dynamic>.from(body as Map? ?? {});
     dynamic result;
     if (path == '/auth/status' && method == 'GET') {
-      return {'authenticated': state['authenticated'], 'auth_required': true};
+      return {
+        'authenticated': state['authenticated'],
+        'auth_required': state['auth_required'] ?? true,
+      };
     }
     if ((path == '/auth/login' || path == '/auth/setup') && method == 'POST') {
       if (data['password'] != 'mock123456') {

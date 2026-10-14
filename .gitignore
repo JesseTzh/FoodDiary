@@ -54,3 +54,4 @@ frontend/lib/generated_plugin_registrant.dart
 node_modules/
 web-startup-artifacts/
 android-startup-artifacts/
+mock-page-artifacts/

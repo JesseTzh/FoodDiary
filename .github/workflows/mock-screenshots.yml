@@ -1,0 +1,53 @@
+name: Mock page screenshots
+
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Capture every mock page (mobile and desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout-ref || github.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Build isolated mock frontend
+        run: bash scripts/build-web.sh --dart-define=MOCK_API=true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/ci/web/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: scripts/ci/web
+        run: npm ci
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-chromium-${{ hashFiles('scripts/ci/web/package-lock.json') }}
+      - name: Install Chromium and system dependencies
+        working-directory: scripts/ci/web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Capture all pages using mock data
+        run: bash scripts/ci/verify-mock-pages.sh
+      - name: Upload screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fooddiary-mock-pages
+          path: mock-page-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

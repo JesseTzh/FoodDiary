@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "smoke": "node smoke.mjs"
+    "smoke": "node smoke.mjs",
+    "mock-pages": "node mock-pages.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2"

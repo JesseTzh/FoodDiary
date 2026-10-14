@@ -94,7 +94,7 @@ jobs:
           retention-days: 14
 
   android:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -159,6 +159,11 @@ jobs:
           path: android-startup-artifacts/
           if-no-files-found: warn
           retention-days: 14
+
+  mock-screenshots:
+    name: Mock screenshots of all pages
+    needs: android
+    uses: ./.github/workflows/mock-screenshots.yml
 
   build-and-push:
     name: Build and push Docker image

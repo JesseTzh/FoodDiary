@@ -2,8 +2,10 @@ name: Android Release
 
 on:
   push:
+    branches:
+      - '**'
     tags:
-      - 'v*'
+      - '**'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -12,7 +14,7 @@ on:
         type: string
 
 concurrency:
-  group: android-release-${{ github.event.inputs.release_tag || github.ref_name }}
+  group: android-release-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -24,23 +26,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || (github.ref_type == 'branch' && format('ci-{0}', github.sha) || github.ref_name) }}
       API_BASE_URL: ${{ vars.API_BASE_URL }}
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout build ref
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.release_tag || github.ref }}
+          ref: ${{ github.event.inputs.release_tag || github.sha }}
           fetch-depth: 0
 
       - name: Validate release tag
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]] || { echo '发布标签必须以 v 和版本数字开头'; exit 1; }
-          TAG_COMMIT="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
-          [[ "$TAG_COMMIT" == "$(git rev-parse HEAD)" ]] || { echo '检出版本与发布标签不一致'; exit 1; }
+          if [[ "${{ github.event_name }}" == workflow_dispatch || "${{ github.ref_type }}" == tag ]]; then
+            TAG_COMMIT="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
+            [[ "$TAG_COMMIT" == "$(git rev-parse HEAD)" ]] || { echo '检出版本与发布标签不一致'; exit 1; }
+          else
+            [[ "$RELEASE_TAG" =~ ^ci-[0-9a-f]{40}$ ]] || { echo 'CI 发布标识无效'; exit 1; }
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v6
@@ -140,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-artifacts
-          APK_NAME="fooddiary-$RELEASE_TAG-android.apk"
+          APK_NAME="fooddiary-$(git rev-parse --short=12 HEAD)-android.apk"
           cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/$APK_NAME"
           cd release-artifacts
           sha256sum "$APK_NAME" > "$APK_NAME.sha256"
@@ -154,7 +159,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: fooddiary-${{ env.RELEASE_TAG }}-android
+          name: fooddiary-release-android
           compression-level: 0
           retention-days: 14
           path: |
@@ -165,6 +170,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ startsWith(env.RELEASE_TAG, 'ci-') }}
+          make_latest: ${{ startsWith(env.RELEASE_TAG, 'ci-') && 'false' || 'true' }}
           body_path: release-artifacts/release-notes.md
           append_body: true
           generate_release_notes: true
@@ -178,3 +186,10 @@ jobs:
         shell: bash
         run: |
           rm -f frontend/android/key.properties "$RUNNER_TEMP/fooddiary-release.jks"
+
+  mock-screenshots:
+    name: Mock screenshots of all pages
+    needs: release
+    uses: ./.github/workflows/mock-screenshots.yml
+    with:
+      checkout-ref: ${{ github.event.inputs.release_tag || github.sha }}
