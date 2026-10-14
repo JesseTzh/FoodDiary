@@ -69,13 +69,24 @@ async function startApplication() {
 
 async function assertFirstRun() {
   await expect(page.locator('[flt-semantics-identifier="first-run-password-prompt"]')).toBeVisible();
-  await expect(page.locator('[flt-semantics-identifier="setup-password-input"]')).toBeVisible();
+  await expect(semanticControl('setup-password-input')).toBeVisible();
   await expect(page.locator('[flt-semantics-identifier="setup-submit"]')).toBeVisible();
+}
+
+function semanticControl(identifier) {
+  // Flutter exposes the test identifier on the semantics container. The
+  // editable element is a native input nested inside that container, so the
+  // container itself cannot be used with Playwright's fill().
+  return page.locator(
+    `[flt-semantics-identifier="${identifier}"] input, ` +
+    `[flt-semantics-identifier="${identifier}"] textarea, ` +
+    `[flt-semantics-identifier="${identifier}"] [contenteditable="true"]`,
+  ).first();
 }
 
 async function authenticate() {
   await expect(page.locator('[flt-semantics-identifier="login-password-prompt"]')).toBeVisible();
-  await page.locator('[flt-semantics-identifier="login-password-input"]').fill(password);
+  await semanticControl('login-password-input').fill(password);
   authenticationStarted = true;
   await page.locator('[flt-semantics-identifier="login-submit"]').click();
   await expect(page.locator('[flt-semantics-identifier="home-record-action"]')).toBeVisible();
