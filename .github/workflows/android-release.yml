@@ -43,12 +43,12 @@ jobs:
           [[ "$TAG_COMMIT" == "$(git rev-parse HEAD)" ]] || { echo '检出版本与发布标签不一致'; exit 1; }
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload startup screenshot and diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fooddiary-release-android-startup
           path: android-startup-artifacts/
@@ -152,7 +152,7 @@ jobs:
           printf '\n%s\n' 'SHA-256 校验文件随 APK 一并提供。' >> release-notes.md
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fooddiary-${{ env.RELEASE_TAG }}-android
           compression-level: 0
