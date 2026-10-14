@@ -619,9 +619,7 @@ class _RecordPageState extends State<RecordPage> {
       PrimaryButton(
         '填写菜品信息',
         icon: Icons.arrow_forward_rounded,
-        onPressed: previews.isEmpty && widget.entry == null
-            ? null
-            : () => setState(() => step = 1),
+        onPressed: () => setState(() => step = 1),
       ),
     ],
   );
