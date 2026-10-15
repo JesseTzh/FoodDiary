@@ -53,6 +53,13 @@ function installDiagnostics() {
       messages.push(`Expected request cancellation: ${request.url()}`);
       return;
     }
+    // The unauthenticated refresh probe can be cancelled when the welcome
+    // page replaces its loading frame. It is expected before login starts.
+    if (reason === 'net::ERR_ABORTED' && request.method() === 'POST' &&
+        !authenticationStarted && url.pathname === '/api/v1/auth/refresh') {
+      messages.push(`Expected refresh cancellation: ${request.url()}`);
+      return;
+    }
     // A login response can be cancelled after its headers set the session
     // cookie. Defer classification until both that response and the home UI
     // have been verified; other aborted requests remain failures.
@@ -112,7 +119,12 @@ function semanticControl(identifier) {
 async function authenticate() {
   await expect(page.locator('[flt-semantics-identifier="login-password-prompt"]')).toBeVisible();
   const input = semanticControl('login-password-input');
-  await input.fill(password);
+  // Focus first so Flutter attaches its editing controller before typing.
+  // fill() on the initially unfocused semantics input can lose its value
+  // when Flutter takes over the native element, leaving submit() empty.
+  await input.click();
+  await input.pressSequentially(password);
+  await expect(input).toHaveValue(password);
   authenticationStarted = true;
   const isLoginResponse = (response) => response.request().method() === 'POST' &&
     new URL(response.url()).pathname === '/api/v1/auth/login';
@@ -120,8 +132,10 @@ async function authenticate() {
   // onSubmitted callback directly. Some CanvasKit builds intermittently
   // swallow that key event, so fall back to the semantics button quickly.
   const submitAndWait = async (submit, waitTimeout) => {
-    const response = page.waitForResponse(isLoginResponse, { timeout: waitTimeout });
-    await submit();
+    const [response] = await Promise.all([
+      page.waitForResponse(isLoginResponse, { timeout: waitTimeout }),
+      submit(),
+    ]);
     return response;
   };
   let loginResponse;
