@@ -378,6 +378,7 @@ class RecordPage extends StatefulWidget {
 class _RecordPageState extends State<RecordPage> {
   final form = GlobalKey<FormState>();
   late TextEditingController notes;
+  late TextEditingController diaryNotes;
   final customTag = TextEditingController();
   late DateTime date;
   String category = '家常菜';
@@ -400,7 +401,10 @@ class _RecordPageState extends State<RecordPage> {
   void initState() {
     super.initState();
     final e = widget.entry;
-    notes = TextEditingController(text: e?.notes ?? '');
+    notes = TextEditingController(
+      text: e?.dishes.isNotEmpty == true ? e!.dishes.first['notes'] ?? '' : '',
+    );
+    diaryNotes = TextEditingController(text: e?.notes ?? '');
     date = e == null ? DateTime.now() : DateTime.parse(e.date);
     step = e == null ? 0 : 1;
     category = categories.contains(e?.category) ? e!.category : category;
@@ -427,6 +431,7 @@ class _RecordPageState extends State<RecordPage> {
   @override
   void dispose() {
     notes.dispose();
+    diaryNotes.dispose();
     customTag.dispose();
     super.dispose();
   }
@@ -463,7 +468,6 @@ class _RecordPageState extends State<RecordPage> {
         source: source,
         max: room,
       );
-      DateTime? suggestedDate;
       for (final picked in selected) {
         final f = picked.file;
         final data = picked.bytes;
@@ -475,31 +479,6 @@ class _RecordPageState extends State<RecordPage> {
             fileDishIndices.add(photoDishIndex.clamp(0, dishes.length - 1));
           });
         }
-        suggestedDate ??= imageDateFromBytes(data);
-      }
-      if (suggestedDate != null && !_sameDay(suggestedDate, date) && mounted) {
-        final useImageDate = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('发现照片日期'),
-            content: Text(
-              '照片信息显示拍摄日期为 ${suggestedDate!.toIso8601String().substring(0, 10)}，与当前做饭日期不同。要使用照片日期吗？',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('继续使用当前日期'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('使用照片日期'),
-              ),
-            ],
-          ),
-        );
-        if (useImageDate == true && mounted) {
-          setState(() => date = suggestedDate!);
-        }
       }
       if (selected.length >= room && mounted) toast(context, '最多可以保存 9 张照片');
       if (selected.isNotEmpty && mounted && step == 0) {
@@ -509,9 +488,6 @@ class _RecordPageState extends State<RecordPage> {
       if (mounted) toast(context, e);
     }
   }
-
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
 
   Future<void> save() async {
     if (step != 2 && !(form.currentState?.validate() ?? false)) return;
@@ -533,7 +509,7 @@ class _RecordPageState extends State<RecordPage> {
                 },
               )
               .toList(),
-          'notes': notes.text.trim(),
+          'notes': diaryNotes.text.trim(),
           'cooked_on': date.toIso8601String().substring(0, 10),
           'category': category,
           'mood': mood,
@@ -580,70 +556,77 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  Widget _photoStep() => Column(
-    key: const ValueKey('photo-step'),
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      CozyCard(
-        child: Column(
+  Widget _photoStep() => CozyCard(
+    child: Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.auto_awesome, size: 38, color: orange),
-            const SizedBox(height: 12),
-            const Text(
-              '上传今日成果',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            TextButton.icon(
+              onPressed: saving || savedId != null
+                  ? null
+                  : () => pick(ImageSource.gallery),
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: const Text('选择照片'),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              '支持选择多张',
-              style: TextStyle(color: muted, fontSize: 12),
+            TextButton.icon(
+              onPressed: saving || savedId != null
+                  ? null
+                  : () => pick(ImageSource.camera),
+              label: const Text('拍照'),
             ),
-            const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                TextButton.icon(
-                  onPressed: saving ? null : () => pick(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('选择照片'),
-                ),
-                TextButton.icon(
-                  onPressed: saving ? null : () => pick(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('拍照'),
-                ),
-              ],
-            ),
-            if (previews.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final p in previews)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.memory(
-                          p,
-                          width: 76,
-                          height: 76,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
           ],
         ),
-      ),
-      const SizedBox(height: 20),
-      PrimaryButton(
-        '填写菜品信息',
-        icon: Icons.arrow_forward_rounded,
-        onPressed: saving ? null : () => setState(() => step = 1),
-      ),
-    ],
+        if (previews.isNotEmpty || widget.entry?.photos.isNotEmpty == true)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final path in widget.entry?.photos ?? <String>[])
+                DishPhoto(api: widget.api, path: path, width: 76, height: 76),
+              for (var i = 0; i < previews.length; i++)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.memory(
+                            previews[i],
+                            width: 76,
+                            height: 76,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        if (savedId == null)
+                          Positioned(
+                            top: -8,
+                            right: -8,
+                            child: IconButton(
+                              onPressed: saving
+                                  ? null
+                                  : () => setState(() {
+                                      files.removeAt(i);
+                                      previews.removeAt(i);
+                                      fileDishIndices.removeAt(i);
+                                      fileCrops.removeAt(i);
+                                    }),
+                              icon: const Icon(
+                                Icons.cancel,
+                                color: ink,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+            ],
+          ),
+      ],
+    ),
   );
 
   Widget _finalStep() => Form(
@@ -665,13 +648,34 @@ class _RecordPageState extends State<RecordPage> {
                 style: TextStyle(color: muted, fontSize: 12),
               ),
               const SizedBox(height: 18),
+              label('做饭日期'),
+              OutlinedButton.icon(
+                onPressed: savedId != null
+                    ? null
+                    : () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: date,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
+                          ),
+                        );
+                        if (d != null) setState(() => date = d);
+                      },
+                icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                label: Text(date.toIso8601String().substring(0, 10)),
+              ),
+              const SizedBox(height: 18),
               TextFormField(
-                controller: notes,
+                controller: diaryNotes,
                 maxLength: 200,
                 maxLines: 4,
                 decoration: const InputDecoration(hintText: '今天的做饭心得…'),
               ),
               const SizedBox(height: 10),
+              const Text('今日心情', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: List.generate(
@@ -716,23 +720,20 @@ class _RecordPageState extends State<RecordPage> {
       appBar: AppBar(title: Text(widget.entry == null ? '记录做饭' : '编辑日记')),
       body: PageBody(
         children: [
+          if (step != 2) _photoStep(),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 420),
-            transitionBuilder: (child, animation) => SlideTransition(
-              position:
-                  Tween<Offset>(
-                    begin: const Offset(0.22, 0),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    ),
-                  ),
+            transitionBuilder: (child, animation) => SizeTransition(
+              sizeFactor: CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              ),
+              axis: Axis.vertical,
+              alignment: Alignment.topCenter,
               child: FadeTransition(opacity: animation, child: child),
             ),
             child: step == 0
-                ? _photoStep()
+                ? const SizedBox.shrink()
                 : step == 2
                 ? _finalStep()
                 : Form(
@@ -740,177 +741,6 @@ class _RecordPageState extends State<RecordPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CozyCard(
-                          child: Column(
-                            children: [
-                              const Icon(
-                                Icons.camera_alt_outlined,
-                                size: 30,
-                                color: Color(0xFF8C6746),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '晒晒今天的美味',
-                                style: TextStyle(fontSize: 13),
-                              ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                '最多可添加 9 张照片',
-                                style: TextStyle(fontSize: 11, color: muted),
-                              ),
-                              const SizedBox(height: 12),
-                              DropdownButton<int>(
-                                isExpanded: true,
-                                value: photoDishIndex.clamp(
-                                  0,
-                                  dishes.length - 1,
-                                ),
-                                onChanged: savedId != null
-                                    ? null
-                                    : (v) {
-                                        if (v != null) {
-                                          setState(() => photoDishIndex = v);
-                                        }
-                                      },
-                                items: [
-                                  for (var i = 0; i < dishes.length; i++)
-                                    DropdownMenuItem(
-                                      value: i,
-                                      child: Text(
-                                        '照片归属：${dishes[i]['title'].toString().isEmpty ? '第 ${i + 1} 道菜' : dishes[i]['title']}',
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  TextButton.icon(
-                                    onPressed: saving || savedId != null
-                                        ? null
-                                        : () => pick(ImageSource.gallery),
-                                    icon: const Icon(
-                                      Icons.photo_library_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('选择照片'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: saving || savedId != null
-                                        ? null
-                                        : () => pick(ImageSource.camera),
-                                    icon: const Icon(
-                                      Icons.camera_alt_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('拍照'),
-                                  ),
-                                ],
-                              ),
-                              if (previews.isNotEmpty ||
-                                  widget.entry?.photos.isNotEmpty == true)
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final path
-                                        in widget.entry?.photos ?? <String>[])
-                                      DishPhoto(
-                                        api: widget.api,
-                                        path: path,
-                                        width: 76,
-                                        height: 76,
-                                      ),
-                                    for (var i = 0; i < previews.length; i++)
-                                      Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Stack(
-                                            children: [
-                                              ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                child: Image.memory(
-                                                  previews[i],
-                                                  width: 76,
-                                                  height: 76,
-                                                  fit: BoxFit.cover,
-                                                ),
-                                              ),
-                                              if (savedId == null)
-                                                Positioned(
-                                                  top: -8,
-                                                  right: -8,
-                                                  child: IconButton(
-                                                    onPressed: saving
-                                                        ? null
-                                                        : () => setState(() {
-                                                            files.removeAt(i);
-                                                            previews.removeAt(
-                                                              i,
-                                                            );
-                                                            fileDishIndices
-                                                                .removeAt(i);
-                                                            fileCrops.removeAt(
-                                                              i,
-                                                            );
-                                                          }),
-                                                    icon: const Icon(
-                                                      Icons.cancel,
-                                                      color: ink,
-                                                      size: 20,
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                          SizedBox(
-                                            width: 130,
-                                            child: DropdownButton<int>(
-                                              isExpanded: true,
-                                              value: fileDishIndices[i],
-                                              onChanged:
-                                                  saving || savedId != null
-                                                  ? null
-                                                  : (v) {
-                                                      if (v != null) {
-                                                        setState(
-                                                          () =>
-                                                              fileDishIndices[i] =
-                                                                  v,
-                                                        );
-                                                      }
-                                                    },
-                                              items: [
-                                                for (
-                                                  var d = 0;
-                                                  d < dishes.length;
-                                                  d++
-                                                )
-                                                  DropdownMenuItem(
-                                                    value: d,
-                                                    child: Text(
-                                                      dishes[d]['title']
-                                                              .toString()
-                                                              .trim()
-                                                              .isEmpty
-                                                          ? '第 ${d + 1} 道菜'
-                                                          : dishes[d]['title'],
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                  ],
-                                ),
-                            ],
-                          ),
-                        ),
                         const SizedBox(height: 26),
                         label('今天做的菜'),
                         for (var i = 0; i < dishes.length; i++)
@@ -1049,29 +879,6 @@ class _RecordPageState extends State<RecordPage> {
                             label: const Text('再添加一道菜'),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        label('做饭日期'),
-                        OutlinedButton.icon(
-                          onPressed: savedId != null
-                              ? null
-                              : () async {
-                                  final d = await showDatePicker(
-                                    context: context,
-                                    initialDate: date,
-                                    firstDate: DateTime(2000),
-                                    lastDate: DateTime.now().add(
-                                      const Duration(days: 365),
-                                    ),
-                                  );
-                                  if (d != null) setState(() => date = d);
-                                },
-                          icon: const Icon(
-                            Icons.calendar_today_outlined,
-                            size: 16,
-                          ),
-                          label: Text(date.toIso8601String().substring(0, 10)),
-                        ),
-                        const SizedBox(height: 18),
                         label('这道菜的备注'),
                         TextFormField(
                           controller: notes,
@@ -1156,62 +963,34 @@ class _RecordPageState extends State<RecordPage> {
                           ),
                         ),
                         const SizedBox(height: 22),
-                        label('心情'),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: List.generate(
-                            5,
-                            (i) => Semantics(
-                              label: ['满足', '幸福', '开心', '惊喜', '不太顺利'][i],
-                              selected: mood == i,
-                              button: true,
-                              child: InkWell(
-                                onTap: savedId != null
-                                    ? null
-                                    : () => setState(() => mood = i),
-                                borderRadius: BorderRadius.circular(16),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 150),
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: mood == i
-                                        ? const Color(0xFFFFEACB)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: Text(
-                                    moods[i],
-                                    style: const TextStyle(fontSize: 26),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                         const SizedBox(height: 28),
                         Row(
                           children: [
                             Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: saving || dishes.length >= 20
-                                    ? null
-                                    : () {
-                                        if (!(form.currentState?.validate() ?? false)) {
-                                          return;
-                                        }
-                                        _syncCurrentDish();
-                                        setState(() {
-                                          dishes.add({'id': '', 'title': ''});
-                                          notes.clear();
-                                          rating = 0;
-                                          tags.clear();
-                                          showCustomTag = false;
-                                          step = 0;
-                                          photoDishIndex = dishes.length - 1;
-                                        });
-                                      },
-                                icon: const Icon(Icons.add),
-                                label: const Text('下一道菜'),
+                              child: SizedBox(
+                                height: 50,
+                                child: OutlinedButton.icon(
+                                  onPressed: saving || dishes.length >= 20
+                                      ? null
+                                      : () {
+                                          if (!(form.currentState?.validate() ??
+                                              false)) {
+                                            return;
+                                          }
+                                          _syncCurrentDish();
+                                          setState(() {
+                                            dishes.add({'id': '', 'title': ''});
+                                            notes.clear();
+                                            rating = 0;
+                                            tags.clear();
+                                            showCustomTag = false;
+                                            step = 1;
+                                            photoDishIndex = dishes.length - 1;
+                                          });
+                                        },
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('下一道菜'),
+                                ),
                               ),
                             ),
                             const SizedBox(width: 12),
