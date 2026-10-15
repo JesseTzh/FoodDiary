@@ -637,6 +637,12 @@ class _RecordPageState extends State<RecordPage> {
           ],
         ),
       ),
+      const SizedBox(height: 20),
+      PrimaryButton(
+        '填写菜品信息',
+        icon: Icons.arrow_forward_rounded,
+        onPressed: saving ? null : () => setState(() => step = 1),
+      ),
     ],
   );
 
