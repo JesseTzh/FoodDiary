@@ -92,8 +92,7 @@ try {
       await page.locator('flt-semantics-placeholder').evaluate(element => element.click());
       await capture('home', id('home-record-action'));
       await click(id('home-record-action'));
-      await click(page.getByRole('button', { name: '填写菜品信息' }));
-      await capture('record', text('晒晒今天的美味'));
+      await capture('record', text('记录做饭'));
       await back(id('home-record-action'));
       await click(text('日记'));
       await capture('diary', id('diary-entry'));
@@ -111,8 +110,7 @@ try {
       await click(page.getByRole('group', { name: '番茄炒蛋 家常菜', exact: true }));
       await capture('recipe-detail', text('今日菜谱'));
       await click(text('今天就做这道菜'));
-      await click(page.getByRole('button', { name: '填写菜品信息' }));
-      await capture('recipe-record', text('晒晒今天的美味'));
+      await capture('recipe-record', text('记录做饭'));
       await back(text('今日菜谱'));
       await back(page.getByRole('button', { name: '创建菜谱' }));
       await click(page.getByRole('button', { name: '创建菜谱' }));
