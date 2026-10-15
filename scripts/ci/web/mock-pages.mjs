@@ -29,14 +29,24 @@ try {
         entries: [{
           id: 'ci-entry', title: '番茄炒蛋', cooked_on: '2026-10-14',
           meal: '晚餐', category: '家常菜', notes: '截图测试记录',
-          tags: ['家常菜'], mood: 0, version: 1, favorite: false, media: [],
+          tags: ['家常菜'], mood: 0, version: 1, favorite: false,
+          media: [{
+            id: 'ci-entry-photo',
+            url: 'asset:assets/images/tomato-scrambled-eggs.png',
+            crop_x: 0, crop_y: 0, crop_width: 1, crop_height: 1,
+          }],
           dishes: [{ id: 'ci-recipe', title: '番茄炒蛋' }],
         }],
         recipes: [{
           id: 'ci-recipe', title: '番茄炒蛋', category: '家常菜',
           description: '截图测试菜谱', image: '', ingredients: ['番茄', '鸡蛋'],
           steps: ['翻炒后装盘'], favorite: true, custom: true,
-          photos: [], cover_media_id: '',
+          photos: [{
+            id: 'ci-recipe-photo',
+            url: 'asset:assets/images/tomato-scrambled-eggs.png',
+            recipe_id: 'ci-recipe',
+            crop_x: 0, crop_y: 0, crop_width: 1, crop_height: 1,
+          }], cover_media_id: 'ci-recipe-photo',
         }],
       };
       localStorage.setItem(key, JSON.stringify(JSON.stringify(state)));

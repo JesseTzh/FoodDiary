@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -46,9 +47,18 @@ class ImageUpload {
             .showSnackBar(const SnackBar(content: Text('单张照片不能超过 20 MB')));
         continue;
       }
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final imageSize = Size(
+        frame.image.width.toDouble(),
+        frame.image.height.toDouble(),
+      );
+      frame.image.dispose();
+      codec.dispose();
+      if (!context.mounted) break;
       final crop = await showDialog<Rect>(
         context: context,
-        builder: (_) => _CropDialog(bytes: bytes),
+        builder: (_) => ImageCropDialog(bytes: bytes, imageSize: imageSize),
       );
       if (crop != null) result.add(SelectedImage(file, bytes, crop));
     }
@@ -56,17 +66,33 @@ class ImageUpload {
   }
 }
 
-class _CropDialog extends StatefulWidget {
+class ImageCropDialog extends StatefulWidget {
   final Uint8List bytes;
-  const _CropDialog({required this.bytes});
+  final Size imageSize;
+  const ImageCropDialog({
+    super.key,
+    required this.bytes,
+    required this.imageSize,
+  });
   @override
-  State<_CropDialog> createState() => _CropDialogState();
+  State<ImageCropDialog> createState() => _CropDialogState();
 }
 
-class _CropDialogState extends State<_CropDialog> {
+class _CropDialogState extends State<ImageCropDialog> {
   // The cover is a 16:9 frame; coordinates stay normalized so the original
   // file remains untouched and the same selection works on every viewport.
-  Rect crop = const Rect.fromLTWH(.05, .247, .9, .506);
+  late Rect crop;
+
+  @override
+  void initState() {
+    super.initState();
+    final aspect = widget.imageSize.aspectRatio;
+    const coverAspect = 16 / 9;
+    final width = aspect > coverAspect ? .9 * coverAspect / aspect : .9;
+    final height = aspect > coverAspect ? .9 : .9 * aspect / coverAspect;
+    crop = Rect.fromLTWH((1 - width) / 2, (1 - height) / 2, width, height);
+  }
+
   Offset? down;
   Rect? start;
 
@@ -84,45 +110,55 @@ class _CropDialogState extends State<_CropDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('调整头图范围'),
-    content: LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxWidth * .68);
-        return SizedBox(
-          width: size.width,
-          height: size.height,
-          child: GestureDetector(
-            onPanStart: (d) {
-              down = d.localPosition;
-              start = crop;
-            },
-            onPanUpdate: (d) => move(d, size),
-            onPanEnd: (_) {
-              down = null;
-              start = null;
-            },
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.memory(widget.bytes, fit: BoxFit.cover),
-                CustomPaint(painter: _CropPainter(crop)),
-                Positioned.fromRect(
-                  rect: Rect.fromLTWH(
-                    crop.left * size.width,
-                    crop.top * size.height,
-                    crop.width * size.width,
-                    crop.height * size.height,
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white, width: 2),
+    content: SizedBox(
+      width: 320,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = applyBoxFit(
+            BoxFit.contain,
+            widget.imageSize,
+            Size(constraints.maxWidth, MediaQuery.sizeOf(context).height * .45),
+          ).destination;
+          return Center(
+            heightFactor: 1,
+            child: SizedBox(
+              width: size.width,
+              height: size.height,
+              child: GestureDetector(
+                onPanStart: (d) {
+                  down = d.localPosition;
+                  start = crop;
+                },
+                onPanUpdate: (d) => move(d, size),
+                onPanEnd: (_) {
+                  down = null;
+                  start = null;
+                },
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(widget.bytes, fit: BoxFit.contain),
+                    CustomPaint(painter: _CropPainter(crop)),
+                    Positioned.fromRect(
+                      rect: Rect.fromLTWH(
+                        crop.left * size.width,
+                        crop.top * size.height,
+                        crop.width * size.width,
+                        crop.height * size.height,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     ),
     actions: [
       TextButton(
@@ -148,11 +184,11 @@ class _CropPainter extends CustomPainter {
       crop.width * size.width,
       crop.height * size.height,
     );
-    canvas.drawColor(Colors.black54, BlendMode.srcOver);
-    canvas.save();
-    canvas.clipRect(hole);
-    canvas.drawColor(Colors.transparent, BlendMode.clear);
-    canvas.restore();
+    final outside = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(Offset.zero & size)
+      ..addRect(hole);
+    canvas.drawPath(outside, Paint()..color = Colors.black54);
   }
 
   @override

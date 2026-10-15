@@ -882,10 +882,6 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         ],
       ),
       const SizedBox(height: 30),
-      const Center(
-        child: Text(appVersion, style: TextStyle(color: muted, fontSize: 11)),
-      ),
-      const SizedBox(height: 18),
       CozyCard(
         padding: EdgeInsets.zero,
         child: Column(
@@ -933,36 +929,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         ),
       ),
       const SizedBox(height: 30),
-      CozyCard(
-        padding: EdgeInsets.zero,
-        child: Row(
-          children: [
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  '把喜欢的味道记下来',
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-            ClipRRect(
-              borderRadius: const BorderRadius.horizontal(
-                right: Radius.circular(22),
-              ),
-              child: Image.asset(
-                'assets/images/together.png',
-                height: 220,
-                width: 125,
-                fit: BoxFit.cover,
-              ),
-            ),
-          ],
-        ),
+      const Center(
+        child: Text(appVersion, style: TextStyle(color: muted, fontSize: 11)),
       ),
     ],
   );

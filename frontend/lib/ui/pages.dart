@@ -8,6 +8,7 @@ import '../data/api.dart';
 import '../data/models.dart';
 import 'theme.dart';
 import 'image_upload.dart';
+import 'cropped_photo.dart';
 import '../version.dart';
 
 /// Reads the capture date stored in common image metadata.
@@ -124,51 +125,57 @@ class DishPhoto extends StatelessWidget {
   final Api api;
   final String? path;
   final double? width;
-  final double height;
+  final double? height;
   final Rect? crop;
   const DishPhoto({
     super.key,
     required this.api,
     this.path,
     this.width,
-    this.height = 220,
+    this.height,
     this.crop,
   });
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(18),
-    child: SizedBox(
-      width: width,
-      height: height,
-      child: path == null
-          ? placeholder()
-          : _cropped(
-              api.mock && path!.startsWith('asset:')
-                  ? Image.asset(path!.substring(6), fit: BoxFit.cover)
-                  : api.mock && path!.startsWith('data:')
-                  ? Image.memory(
-                      base64Decode(path!.split(',').last),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => placeholder(),
-                    )
-                  : Image.network(
-                      api.url(path!),
-                      headers: kIsWeb ? null : api.headers,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => placeholder(),
-                      loadingBuilder: (_, child, progress) =>
-                          progress == null ? child : placeholder(),
-                    ),
-            ),
-    ),
-  );
-  Widget _cropped(Widget image) {
-    final c = crop;
-    if (c == null || c.width >= .99 && c.height >= .99) return image;
-    return Transform.scale(
-      scale: 1 / (c.width < c.height ? c.width : c.height),
-      alignment: Alignment((c.center.dx - .5) * 2, (c.center.dy - .5) * 2),
-      child: image,
+  Widget build(BuildContext context) {
+    final photo = path == null ? placeholder() : _photo();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: width,
+        child: height == null
+            ? AspectRatio(aspectRatio: 16 / 9, child: photo)
+            : SizedBox(height: height, child: photo),
+      ),
+    );
+  }
+
+  Widget _photo() {
+    final ImageProvider provider;
+    if (api.mock && path!.startsWith('asset:')) {
+      provider = AssetImage(path!.substring(6));
+    } else if (api.mock && path!.startsWith('data:')) {
+      provider = MemoryImage(base64Decode(path!.split(',').last));
+    } else {
+      provider = NetworkImage(
+        api.url(path!),
+        headers: kIsWeb ? null : api.headers,
+      );
+    }
+    final selection = crop;
+    if (selection != null &&
+        (selection.width < .99 || selection.height < .99)) {
+      return CroppedPhoto(
+        image: provider,
+        crop: selection,
+        placeholder: (_) => placeholder(),
+      );
+    }
+    return Image(
+      image: provider,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => placeholder(),
+      loadingBuilder: (_, child, progress) =>
+          progress == null ? child : placeholder(),
     );
   }
 
@@ -1327,7 +1334,6 @@ class _DiaryPageState extends State<DiaryPage> {
           path: entry.photos.isEmpty ? null : entry.photos[photo],
           crop: entry.photoCrops.isEmpty ? null : entry.photoCrops[photo],
           width: double.infinity,
-          height: 265,
         ),
         const SizedBox(height: 22),
         Text(entry.date, style: const TextStyle(color: muted, fontSize: 12)),
@@ -1612,14 +1618,12 @@ class _RecipePageState extends State<RecipePage> {
               crop: cropFromMedia(
                 photos.firstWhere((p) => p['id'] == coverMediaId),
               ),
-              height: 260,
             )
           else
             DishPhoto(
               api: widget.api,
               path: photos.isEmpty ? null : photos.last['url'] as String,
               crop: photos.isEmpty ? null : cropFromMedia(photos.last),
-              height: 260,
             ),
           const SizedBox(height: 24),
           Text(

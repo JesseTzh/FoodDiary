@@ -134,6 +134,8 @@ Web 使用 HttpOnly、SameSite=Lax Cookie；HTTPS 下 Cookie 带 Secure 标记�
 
 Web 构建必须运行 `make web` 或 `./scripts/build-web.sh`。脚本会在 Flutter 构建后生成 Service Worker。构建使用本地 CanvasKit 和中文字体，不要添加 `--wasm`。
 
+Web、`make apk`、`make appbundle` 与 CI 通过 `scripts/build-flutter.sh` 统一注入显示版本号，格式为 `Ver:yymmdd-hhmm-gitsha`，日期和时间使用打包时的北京时间（Asia/Shanghai）。直接 `flutter run` 未注入版本时显示 `Ver:dev`。
+
 生产反向代理需放行 `.wasm`、字体与 `/media/`，保留服务器返回的 WASM MIME。`index.html`、`flutter_bootstrap.js` 和 `sw.js` 不应被代理长时间缓存。数据库和照片统一备份 `FOODDIARY_DATA_DIR`，不要把该目录放进镜像。
 
 ### 本地验证 CI Web 截图

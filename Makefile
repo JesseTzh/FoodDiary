@@ -10,9 +10,9 @@ check:
 	go vet ./...
 	cd frontend && $(FLUTTER) analyze
 apk:
-	cd frontend && $(FLUTTER) build apk --release --dart-define=API_BASE_URL=$(API_BASE_URL)
+	FLUTTER="$(FLUTTER)" bash scripts/build-flutter.sh apk --release --dart-define=API_BASE_URL=$(API_BASE_URL)
 appbundle:
-	cd frontend && $(FLUTTER) build appbundle --release --dart-define=API_BASE_URL=$(API_BASE_URL)
+	FLUTTER="$(FLUTTER)" bash scripts/build-flutter.sh appbundle --release --dart-define=API_BASE_URL=$(API_BASE_URL)
 dev:
 	@trap 'kill 0' INT TERM EXIT; FOODDIARY_CORS_ORIGINS=http://localhost:5173 go run ./backend/cmd/server & cd frontend && $(FLUTTER) run -d chrome --web-port=5173 --dart-define=API_BASE_URL=http://localhost:8080
 

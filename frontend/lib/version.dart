@@ -1,5 +1,5 @@
-/// Build scripts can override this with --dart-define=APP_VERSION=Ver:yymmdd-hhmm-gitsha.
+/// Release builds inject Ver:yymmdd-hhmm-gitsha (Asia/Shanghai) via build-flutter.sh.
 const appVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: 'Ver:261014-0000-dev',
+  defaultValue: 'Ver:dev',
 );
