@@ -8,7 +8,7 @@ flutter run -d chrome --web-port=5173 --dart-define=API_BASE_URL=http://localhos
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 ```
 
-Web 发布请从仓库根目录运行 `make web`，生成包含本地 CanvasKit 与 PWA Service Worker 的完整资源。Android 发布使用 `make apk API_BASE_URL=https://your-server.example`。
+Web 发布请从仓库根目录运行 `make web`，生成包含本地 CanvasKit 与 PWA Service Worker 的完整资源。Android 发布使用 `make apk`，首次启动时输入后端 HTTPS 地址，连接成功后保存在本机。可用 `make apk API_BASE_URL=https://your-server.example` 预填地址，也可通过登录页「修改后端地址」或「我的 → 后端地址」重新配置。切换服务器后需重新登录。Web 无需此配置。
 
 ## 无后端本地调试
 

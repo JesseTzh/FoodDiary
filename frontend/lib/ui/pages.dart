@@ -209,6 +209,7 @@ class WelcomePage extends StatefulWidget {
   final bool setup, loading;
   final String? error;
   final Future<void> Function() onAuthenticated;
+  final VoidCallback? onConfigureServer;
   const WelcomePage({
     super.key,
     required this.api,
@@ -216,6 +217,7 @@ class WelcomePage extends StatefulWidget {
     required this.loading,
     required this.onAuthenticated,
     this.error,
+    this.onConfigureServer,
   });
   @override
   State<WelcomePage> createState() => _WelcomePageState();
@@ -345,6 +347,14 @@ class _WelcomePageState extends State<WelcomePage> {
                     onPressed: busy ? null : submit,
                   ),
                 ],
+                if (widget.onConfigureServer != null)
+                  TextButton.icon(
+                    onPressed: busy || widget.loading
+                        ? null
+                        : widget.onConfigureServer,
+                    icon: const Icon(Icons.dns_outlined),
+                    label: const Text('修改后端地址'),
+                  ),
                 const SizedBox(height: 24),
                 const Text(
                   appVersion,

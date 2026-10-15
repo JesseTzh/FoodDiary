@@ -124,7 +124,7 @@ Web 使用 HttpOnly、SameSite=Lax Cookie；HTTPS 下 Cookie 带 Secure 标记�
 
 ## Android
 
-`com.jessetzh.fooddiary`，主清单声明网络权限，相机和相册通过 image_picker 接入。正式包使用 HTTPS；debug/profile 可使用 HTTP 开发服务器。服务地址通过 `--dart-define=API_BASE_URL=...` 设置。
+`com.jessetzh.fooddiary`，主清单声明网络权限，相机和相册通过 image_picker 接入。正式包使用 HTTPS；debug/profile 可使用 HTTP 开发服务器。APK 首次启动先配置后端地址，验证连接成功后保存在本机，后续启动自动复用。可从登录页「修改后端地址」或「我的 → 后端地址」重新配置；切换服务器会清除本机会话，需要重新登录。连接验证不携带原服务器凭据。`--dart-define=API_BASE_URL=...` 仅作为首次配置的预填地址。Web 保持同源或构建时指定地址，不显示配置入口。Mock 模式跳过配置。
 
 构建命令请使用根目录的 `make apk` / `make appbundle`。正式签名读取 `frontend/android/key.properties`，文件和 keystore 均被忽略。无配置时使用开发签名。正式签名时复制 `frontend/android/key.properties.example` 并填写自己的 keystore 信息。不要提交签名文件、密钥或密码。
 

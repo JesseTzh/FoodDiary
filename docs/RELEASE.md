@@ -72,7 +72,7 @@ git tag v2.0.0
 git push origin v2.0.0
 ```
 
-仓库变量 `API_BASE_URL` 可设置 APK 的默认 HTTPS 服务地址。未设置时，Web 使用当前页面地址，Android 使用模拟器默认地址。
+仓库变量 `API_BASE_URL` 可设置 APK 首次配置时预填的 HTTPS 服务地址。APK 首次启动需确认地址并验证连接，保存后自动复用；未设置变量时需手动输入地址。Web 继续使用当前页面地址（或构建时指定的地址），不显示配置入口。
 
 正式签名需要配置以下 GitHub Actions Secrets：
 

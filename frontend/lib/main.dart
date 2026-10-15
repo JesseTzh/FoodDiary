@@ -8,6 +8,7 @@ import 'data/models.dart';
 import 'ui/theme.dart';
 import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
+import 'ui/server_configuration_page.dart';
 import 'version.dart';
 
 void main() {
@@ -16,19 +17,26 @@ void main() {
 }
 
 class FoodDiaryApp extends StatefulWidget {
-  const FoodDiaryApp({super.key});
+  final Api? api;
+  const FoodDiaryApp({super.key, this.api});
   @override
   State<FoodDiaryApp> createState() => _FoodDiaryAppState();
 }
 
 class _FoodDiaryAppState extends State<FoodDiaryApp> {
-  final api = Api();
+  late final api = widget.api ?? Api();
   bool ready = false;
+  bool configuringServer = false;
   @override
   void initState() {
     super.initState();
     api.init().then((_) {
-      if (mounted) setState(() => ready = true);
+      if (mounted) {
+        setState(() {
+          ready = true;
+          configuringServer = api.needsServerConfiguration;
+        });
+      }
     });
   }
 
@@ -37,7 +45,22 @@ class _FoodDiaryAppState extends State<FoodDiaryApp> {
     title: '做饭日记',
     debugShowCheckedModeBanner: false,
     theme: kitchenTheme(),
-    home: ready ? Kitchen(api: api) : const _OpeningPage(),
+    home: !ready
+        ? const _OpeningPage()
+        : configuringServer
+        ? ServerConfigurationPage(
+            api: api,
+            onSaved: () => setState(() => configuringServer = false),
+            onCancel: api.needsServerConfiguration
+                ? null
+                : () => setState(() => configuringServer = false),
+          )
+        : Kitchen(
+            api: api,
+            onConfigureServer: api.canConfigureServer
+                ? () => setState(() => configuringServer = true)
+                : null,
+          ),
   );
 }
 
@@ -53,7 +76,8 @@ class _OpeningPage extends StatelessWidget {
 
 class Kitchen extends StatefulWidget {
   final Api api;
-  const Kitchen({super.key, required this.api});
+  final VoidCallback? onConfigureServer;
+  const Kitchen({super.key, required this.api, this.onConfigureServer});
   @override
   State<Kitchen> createState() => _KitchenState();
 }
@@ -200,6 +224,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         loading: loading,
         error: error,
         onAuthenticated: refresh,
+        onConfigureServer: widget.onConfigureServer,
       );
     }
     final wide = MediaQuery.sizeOf(context).width >= 900;
@@ -925,6 +950,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            if (widget.onConfigureServer != null)
+              menu(Icons.dns_outlined, '后端地址', widget.onConfigureServer!),
           ],
         ),
       ),

@@ -1,6 +1,6 @@
 .PHONY: dev mock web backend build check apk appbundle
 FLUTTER ?= flutter
-API_BASE_URL ?= https://fooddiary.example.com
+API_BASE_URL ?=
 build: web backend
 web:
 	./scripts/build-web.sh

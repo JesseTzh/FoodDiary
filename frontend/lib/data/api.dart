@@ -25,6 +25,11 @@ class Api {
   final FlutterSecureStorage secureStorage = const FlutterSecureStorage();
   Future<bool>? _refreshing;
   int _tokenGeneration = 0;
+  bool get canConfigureServer =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android && !mock;
+  bool get needsServerConfiguration =>
+      canConfigureServer && prefs.getString('server_base_url') == null;
+
   Future<void> init() async {
     prefs = await SharedPreferences.getInstance();
     base = configuredBase.isNotEmpty
@@ -34,6 +39,9 @@ class Api {
       base = 'mock://local';
       _mockStore = MockStore(prefs);
       return;
+    }
+    if (canConfigureServer) {
+      base = prefs.getString('server_base_url') ?? configuredBase;
     }
     // Legacy plaintext credentials are intentionally invalidated by the upgrade.
     await prefs.remove('session');
@@ -49,6 +57,55 @@ class Api {
         }
       }
     }
+  }
+
+  static String normalizeServerAddress(String input) {
+    final value = input.trim().replaceFirst(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        !['http', 'https'].contains(uri.scheme) ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        RegExp(r'\s').hasMatch(value)) {
+      throw const FormatException('请输入完整的后端地址，如 https://food.example.com');
+    }
+    if (kReleaseMode && uri.scheme != 'https') {
+      throw const FormatException('正式版请使用 HTTPS 地址');
+    }
+    return value;
+  }
+
+  Future<void> configureServer(String input) async {
+    if (!canConfigureServer) throw StateError('当前平台不支持配置后端地址');
+    final next = normalizeServerAddress(input);
+    // Probe without credentials: a new server must never receive the old tokens.
+    final response = await client
+        .get(
+          Uri.parse('$next/api/v1/auth/status'),
+          headers: {'X-FoodDiary-Client': 'app'},
+        )
+        .timeout(const Duration(seconds: 20));
+    dynamic data;
+    try {
+      data = jsonDecode(utf8.decode(response.bodyBytes));
+    } on FormatException {
+      throw const FormatException('服务器响应异常，请检查后端地址');
+    }
+    if (response.statusCode != 200 ||
+        data is! Map ||
+        data['data'] is! Map ||
+        data['data']['authenticated'] is! bool ||
+        data['data']['auth_required'] is! bool) {
+      throw const FormatException('未找到做饭日记服务，请检查后端地址');
+    }
+    if (next != base) await _clearTokens();
+    if (!await prefs.setString('server_base_url', next)) {
+      throw Exception('地址保存失败，请重试');
+    }
+    base = next;
   }
 
   Map<String, String> get headers => {
