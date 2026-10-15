@@ -445,6 +445,16 @@ class _RecordPageState extends State<RecordPage> {
     });
   }
 
+  void _syncCurrentDish() {
+    if (dishes.isEmpty) return;
+    final index = photoDishIndex.clamp(0, dishes.length - 1);
+    dishes[index].addAll({
+      'notes': notes.text.trim(),
+      'rating': rating,
+      'tags': tags.toList(),
+    });
+  }
+
   Future<void> pick(ImageSource source) async {
     try {
       final room = 9 - (widget.entry?.photos.length ?? 0) - files.length;
@@ -492,6 +502,9 @@ class _RecordPageState extends State<RecordPage> {
         }
       }
       if (selected.length >= room && mounted) toast(context, '最多可以保存 9 张照片');
+      if (selected.isNotEmpty && mounted && step == 0) {
+        setState(() => step = 1);
+      }
     } catch (e) {
       if (mounted) toast(context, e);
     }
@@ -505,6 +518,7 @@ class _RecordPageState extends State<RecordPage> {
     setState(() => saving = true);
     try {
       if (savedId == null) {
+        _syncCurrentDish();
         final body = {
           ...?widget.entry?.toJson(),
           'title': dishes.first['title'],
@@ -515,6 +529,7 @@ class _RecordPageState extends State<RecordPage> {
                   'title': d['title'],
                   'notes': d['notes'] ?? '',
                   'rating': d['rating'] ?? 0,
+                  'tags': d['tags'] ?? <String>[],
                 },
               )
               .toList(),
@@ -575,12 +590,12 @@ class _RecordPageState extends State<RecordPage> {
             const Icon(Icons.auto_awesome, size: 38, color: orange),
             const SizedBox(height: 12),
             const Text(
-              '先上传这道菜的照片',
+              '上传今日成果',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 6),
             const Text(
-              '支持一次选择多张，照片会自动复用，不重复占用空间。',
+              '支持选择多张',
               style: TextStyle(color: muted, fontSize: 12),
             ),
             const SizedBox(height: 18),
@@ -621,12 +636,6 @@ class _RecordPageState extends State<RecordPage> {
               ),
           ],
         ),
-      ),
-      const SizedBox(height: 20),
-      PrimaryButton(
-        '填写菜品信息',
-        icon: Icons.arrow_forward_rounded,
-        onPressed: () => setState(() => step = 1),
       ),
     ],
   );
@@ -1180,13 +1189,23 @@ class _RecordPageState extends State<RecordPage> {
                               child: OutlinedButton.icon(
                                 onPressed: saving || dishes.length >= 20
                                     ? null
-                                    : () => setState(() {
-                                        dishes.add({'id': '', 'title': ''});
-                                        step = 0;
-                                        photoDishIndex = dishes.length - 1;
-                                      }),
+                                    : () {
+                                        if (!(form.currentState?.validate() ?? false)) {
+                                          return;
+                                        }
+                                        _syncCurrentDish();
+                                        setState(() {
+                                          dishes.add({'id': '', 'title': ''});
+                                          notes.clear();
+                                          rating = 0;
+                                          tags.clear();
+                                          showCustomTag = false;
+                                          step = 0;
+                                          photoDishIndex = dishes.length - 1;
+                                        });
+                                      },
                                 icon: const Icon(Icons.add),
-                                label: const Text('加菜'),
+                                label: const Text('下一道菜'),
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -1199,6 +1218,7 @@ class _RecordPageState extends State<RecordPage> {
                                     : () {
                                         if (form.currentState?.validate() ??
                                             false) {
+                                          _syncCurrentDish();
                                           setState(() => step = 2);
                                         }
                                       },
