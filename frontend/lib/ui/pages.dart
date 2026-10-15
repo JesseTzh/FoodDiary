@@ -556,78 +556,97 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  Widget _photoStep() => CozyCard(
-    child: Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextButton.icon(
-              onPressed: saving || savedId != null
-                  ? null
-                  : () => pick(ImageSource.gallery),
-              icon: const Icon(Icons.photo_library_outlined, size: 18),
-              label: const Text('选择照片'),
+  Widget _photoStep() {
+    final hasPhotos =
+        previews.isNotEmpty || widget.entry?.photos.isNotEmpty == true;
+    return CozyCard(
+      child: Column(
+        children: [
+          if (!hasPhotos) ...[
+            const Icon(
+              Icons.camera_alt_outlined,
+              size: 30,
+              color: Color(0xFF8C6746),
             ),
-            TextButton.icon(
-              onPressed: saving || savedId != null
-                  ? null
-                  : () => pick(ImageSource.camera),
-              label: const Text('拍照'),
+            const SizedBox(height: 8),
+            const Text('晒晒今天的美味', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text(
+              '最多可添加 9 张照片',
+              style: TextStyle(fontSize: 11, color: muted),
             ),
+            const SizedBox(height: 12),
           ],
-        ),
-        if (previews.isNotEmpty || widget.entry?.photos.isNotEmpty == true)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              for (final path in widget.entry?.photos ?? <String>[])
-                DishPhoto(api: widget.api, path: path, width: 76, height: 76),
-              for (var i = 0; i < previews.length; i++)
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.memory(
-                            previews[i],
-                            width: 76,
-                            height: 76,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        if (savedId == null)
-                          Positioned(
-                            top: -8,
-                            right: -8,
-                            child: IconButton(
-                              onPressed: saving
-                                  ? null
-                                  : () => setState(() {
-                                      files.removeAt(i);
-                                      previews.removeAt(i);
-                                      fileDishIndices.removeAt(i);
-                                      fileCrops.removeAt(i);
-                                    }),
-                              icon: const Icon(
-                                Icons.cancel,
-                                color: ink,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
+              TextButton.icon(
+                onPressed: saving || savedId != null
+                    ? null
+                    : () => pick(ImageSource.gallery),
+                icon: const Icon(Icons.photo_library_outlined, size: 18),
+                label: const Text('选择照片'),
+              ),
+              TextButton.icon(
+                onPressed: saving || savedId != null
+                    ? null
+                    : () => pick(ImageSource.camera),
+                label: const Text('拍照'),
+              ),
             ],
           ),
-      ],
-    ),
-  );
+          if (hasPhotos)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final path in widget.entry?.photos ?? <String>[])
+                  DishPhoto(api: widget.api, path: path, width: 76, height: 76),
+                for (var i = 0; i < previews.length; i++)
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.memory(
+                              previews[i],
+                              width: 76,
+                              height: 76,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          if (savedId == null)
+                            Positioned(
+                              top: -8,
+                              right: -8,
+                              child: IconButton(
+                                onPressed: saving
+                                    ? null
+                                    : () => setState(() {
+                                        files.removeAt(i);
+                                        previews.removeAt(i);
+                                        fileDishIndices.removeAt(i);
+                                        fileCrops.removeAt(i);
+                                      }),
+                                icon: const Icon(
+                                  Icons.cancel,
+                                  color: ink,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _finalStep() => Form(
     key: const ValueKey('final-step'),
