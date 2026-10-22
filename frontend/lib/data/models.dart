@@ -79,5 +79,6 @@ class Recipe {
 }
 
 const moods = ['😋', '🥰', '😊', '🤩', '😣'];
+const moodDescriptions = ['美味满足', '幸福满满', '轻松愉快', '惊喜得意', '有点挫败'];
 const categories = ['全部', '家常菜', '素菜', '肉类', '汤类', '主食', '甜品'];
 const diaryTags = ['家常菜', '甜品', '汤类', '小吃', '聚餐', '快手菜'];

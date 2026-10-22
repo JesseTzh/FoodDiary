@@ -259,11 +259,14 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         ),
       ),
       bottomNavigationBar: wide ? null : navigation(),
-      floatingActionButton: tab == 1 && !offline
+      floatingActionButton: (tab == 1 || tab == 2) && !offline
           ? FloatingActionButton(
               backgroundColor: gold,
               foregroundColor: ink,
-              onPressed: record,
+              tooltip: tab == 1 ? '记录做饭' : '创建菜谱',
+              onPressed: tab == 1
+                  ? record
+                  : () => open(NewRecipePage(api: api)),
               child: const Icon(Icons.add),
             )
           : null,
@@ -706,9 +709,9 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                         style: const TextStyle(fontSize: 16),
                       ),
                       const SizedBox(width: 6),
-                      const Text(
-                        '美味日常',
-                        style: TextStyle(
+                      Text(
+                        moodDescriptions[e.mood.clamp(0, 4)],
+                        style: const TextStyle(
                           color: Color(0xFFD6A77A),
                           fontSize: 10,
                         ),
@@ -738,15 +741,11 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         )
         .toList();
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 96),
       children: [
         heading(
           '菜谱',
-          trailing: IconButton(
-            tooltip: '创建菜谱',
-            onPressed: offline ? null : () => open(NewRecipePage(api: api)),
-            icon: const Icon(Icons.add_circle_outline, color: orange),
-          ),
+          trailing: const Icon(Icons.restaurant_menu_outlined, color: muted),
         ),
         TextField(
           onChanged: (v) => setState(() => search = v),

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -19,23 +20,31 @@ class ImageUpload {
     required ImageSource source,
     bool multiple = true,
     int max = 9,
+    bool preserveMetadata = false,
   }) async {
     final picker = ImagePicker();
+    // Web canvas resizing strips EXIF. Native pickers copy it when resizing.
+    final resize = !(preserveMetadata && kIsWeb);
+    final maxWidth = resize ? 1600.0 : null;
+    final quality = resize ? 85 : null;
     final files = source == ImageSource.camera
         ? [
             await picker.pickImage(
               source: source,
-              maxWidth: 1600,
-              imageQuality: 85,
+              maxWidth: maxWidth,
+              imageQuality: quality,
             ),
           ]
         : (multiple
-              ? await picker.pickMultiImage(maxWidth: 1600, imageQuality: 85)
+              ? await picker.pickMultiImage(
+                  maxWidth: maxWidth,
+                  imageQuality: quality,
+                )
               : [
                   await picker.pickImage(
                     source: source,
-                    maxWidth: 1600,
-                    imageQuality: 85,
+                    maxWidth: maxWidth,
+                    imageQuality: quality,
                   ),
                 ]);
     final result = <SelectedImage>[];

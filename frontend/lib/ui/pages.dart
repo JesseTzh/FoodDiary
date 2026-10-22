@@ -11,25 +11,8 @@ import 'image_upload.dart';
 import 'cropped_photo.dart';
 import '../version.dart';
 
-/// Reads the capture date stored in common image metadata.
-///
-/// Camera photos usually store this in JPEG EXIF DateTimeOriginal. The text
-/// fallback also handles PNG comments and exports from apps that preserve the
-/// date as an ISO-like string.
-DateTime? imageDateFromBytes(Uint8List bytes) {
-  final exifDate = _jpegExifDate(bytes);
-  if (exifDate != null) return exifDate;
-  final text = String.fromCharCodes(bytes.where((b) => b >= 32 && b <= 126));
-  final match = RegExp(
-    r'(20\d{2})[:\-](\d{2})[:\-](\d{2})(?:[ T](\d{2})[:\-](\d{2})(?::(\d{2}))?)?',
-  ).firstMatch(text);
-  if (match == null) return null;
-  return _validDate(
-    int.parse(match.group(1)!),
-    int.parse(match.group(2)!),
-    int.parse(match.group(3)!),
-  );
-}
+/// Reads JPEG EXIF dates, preferring capture time over digitization/edit time.
+DateTime? imageDateFromBytes(Uint8List bytes) => _jpegExifDate(bytes);
 
 DateTime? _jpegExifDate(Uint8List bytes) {
   if (bytes.length < 4 || bytes[0] != 0xff || bytes[1] != 0xd8) return null;
@@ -69,8 +52,9 @@ DateTime? _readExifTiff(Uint8List bytes, int start, int end) {
       ? bytes[p] | bytes[p + 1] << 8 | bytes[p + 2] << 16 | bytes[p + 3] << 24
       : bytes[p] << 24 | bytes[p + 1] << 16 | bytes[p + 2] << 8 | bytes[p + 3];
   if (u16(start + 2) != 42) return null;
-  DateTime? readIfd(int at, int depth) {
-    if (depth > 2 || at < start || at + 2 > end) return null;
+  final dates = <int, DateTime>{};
+  void readIfd(int at, int depth) {
+    if (depth > 2 || at < start || at + 2 > end) return;
     final count = u16(at);
     for (var i = 0; i < count; i++) {
       final p = at + 2 + i * 12;
@@ -87,7 +71,7 @@ DateTime? _readExifTiff(Uint8List bytes, int start, int end) {
         final value = String.fromCharCodes(
           bytes.sublist(valueAt, valueAt + size),
         );
-        final match = RegExp(r'(20\d{2})[:\-](\d{2})[:\-](\d{2})')
+        final match = RegExp(r'^(20\d{2})[:\-](\d{2})[:\-](\d{2})')
             .firstMatch(value);
         if (match != null) {
           final parsed = _validDate(
@@ -95,18 +79,17 @@ DateTime? _readExifTiff(Uint8List bytes, int start, int end) {
             int.parse(match.group(2)!),
             int.parse(match.group(3)!),
           );
-          if (parsed != null) return parsed;
+          if (parsed != null) dates.putIfAbsent(tag, () => parsed);
         }
       }
-      if ((tag == 0x8769 || tag == 0x8825) && type == 4 && n == 1) {
-        final nested = readIfd(start + u32(p + 8), depth + 1);
-        if (nested != null) return nested;
+      if (tag == 0x8769 && type == 4 && n == 1) {
+        readIfd(start + u32(p + 8), depth + 1);
       }
     }
-    return null;
   }
 
-  return readIfd(start + u32(start + 4), 0);
+  readIfd(start + u32(start + 4), 0);
+  return dates[0x9003] ?? dates[0x9004] ?? dates[0x0132];
 }
 
 DateTime? _validDate(int year, int month, int day) {
@@ -391,6 +374,9 @@ class _RecordPageState extends State<RecordPage> {
   late TextEditingController diaryNotes;
   final customTag = TextEditingController();
   late DateTime date;
+  bool photoDateFound = false;
+  bool dateFromPhoto = false;
+  bool dateManuallyChanged = false;
   String category = '家常菜';
   int step = 0;
   int mood = 0;
@@ -477,6 +463,7 @@ class _RecordPageState extends State<RecordPage> {
         context,
         source: source,
         max: room,
+        preserveMetadata: true,
       );
       for (final picked in selected) {
         final f = picked.file;
@@ -487,6 +474,21 @@ class _RecordPageState extends State<RecordPage> {
             previews.add(data);
             fileCrops.add(picked.crop);
             fileDishIndices.add(photoDishIndex.clamp(0, dishes.length - 1));
+            if (!photoDateFound && !dateManuallyChanged && savedId == null) {
+              final captured = imageDateFromBytes(data);
+              final lastDate = DateUtils.dateOnly(
+                DateTime.now().add(const Duration(days: 365)),
+              );
+              if (captured != null &&
+                  !captured.isBefore(DateTime(2000)) &&
+                  !captured.isAfter(lastDate)) {
+                photoDateFound = true;
+                if (!DateUtils.isSameDay(captured, date)) {
+                  date = captured;
+                  dateFromPhoto = true;
+                }
+              }
+            }
           });
         }
       }
@@ -690,11 +692,22 @@ class _RecordPageState extends State<RecordPage> {
                             const Duration(days: 365),
                           ),
                         );
-                        if (d != null) setState(() => date = d);
+                        if (d != null) {
+                          setState(() {
+                            date = d;
+                            dateManuallyChanged = true;
+                            dateFromPhoto = false;
+                          });
+                        }
                       },
                 icon: const Icon(Icons.calendar_today_outlined, size: 16),
                 label: Text(date.toIso8601String().substring(0, 10)),
               ),
+              if (dateFromPhoto)
+                const Text(
+                  '已自动从照片中读取日期',
+                  style: TextStyle(color: muted, fontSize: 12),
+                ),
               const SizedBox(height: 18),
               TextFormField(
                 controller: diaryNotes,
@@ -709,21 +722,39 @@ class _RecordPageState extends State<RecordPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: List.generate(
                   5,
-                  (i) => InkWell(
-                    onTap: () => setState(() => mood = i),
-                    borderRadius: BorderRadius.circular(16),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: mood == i
-                            ? const Color(0xFFFFEACB)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        moods[i],
-                        style: const TextStyle(fontSize: 28),
+                  (i) => Expanded(
+                    child: InkWell(
+                      onTap: () => setState(() => mood = i),
+                      borderRadius: BorderRadius.circular(16),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 1,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: mood == i
+                              ? const Color(0xFFFFEACB)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              moods[i],
+                              style: const TextStyle(fontSize: 28),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              moodDescriptions[i],
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: muted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1240,9 +1271,15 @@ class _DiaryPageState extends State<DiaryPage> {
         ),
         const SizedBox(height: 22),
         label('心情'),
-        Text(
-          moods[entry.mood.clamp(0, 4)],
-          style: const TextStyle(fontSize: 32),
+        Row(
+          children: [
+            Text(
+              moods[entry.mood.clamp(0, 4)],
+              style: const TextStyle(fontSize: 32),
+            ),
+            const SizedBox(width: 10),
+            Text(moodDescriptions[entry.mood.clamp(0, 4)]),
+          ],
         ),
         const SizedBox(height: 30),
         Row(
