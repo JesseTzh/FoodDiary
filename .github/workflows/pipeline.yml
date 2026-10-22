@@ -116,6 +116,9 @@ jobs:
           load: true
           platforms: linux/amd64
           tags: ${{ env.CI_IMAGE }}
+          build-args: |
+            BUILD_COMMIT=${{ needs.prepare.outputs.sha }}
+            BUILD_RELEASE_TAG=${{ needs.prepare.outputs.release-tag }}
           cache-from: type=gha,scope=fooddiary-image
           cache-to: type=gha,scope=fooddiary-image,mode=max
       - uses: actions/setup-node@v7
@@ -258,6 +261,7 @@ jobs:
           mkdir -p release-artifacts
           APK_NAME="fooddiary-$(git rev-parse --short=12 HEAD)-android.apk"
           cp frontend/build/app/outputs/flutter-apk/app-release.apk "release-artifacts/$APK_NAME"
+          python3 scripts/ci/android-update-manifest.py "release-artifacts/$APK_NAME"
           cd release-artifacts
           sha256sum "$APK_NAME" > "$APK_NAME.sha256"
           if [[ "$SIGNING_MODE" == release ]]; then
@@ -276,6 +280,7 @@ jobs:
           path: |
             release-artifacts/*.apk
             release-artifacts/*.sha256
+            release-artifacts/android-update.json
             release-artifacts/release-notes.md
 
       - name: Remove signing material
@@ -361,6 +366,7 @@ jobs:
           files: |
             release-artifacts/*.apk
             release-artifacts/*.sha256
+            release-artifacts/android-update.json
 
   deploy-gallery:
     name: Publish mock gallery to GitHub Pages
@@ -389,7 +395,7 @@ jobs:
   build-and-push:
     name: Build and push Docker image
     if: github.event_name != 'pull_request' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')) && !inputs.release_tag
-    needs: [prepare, web-smoke, android, mock-screenshots]
+    needs: [prepare, web-smoke, android, mock-screenshots, release]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
@@ -434,6 +440,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_COMMIT=${{ needs.prepare.outputs.sha }}
+            BUILD_RELEASE_TAG=${{ needs.prepare.outputs.release-tag }}
           cache-from: type=gha,scope=fooddiary-image
           cache-to: type=gha,scope=fooddiary-image,mode=max
 

@@ -84,3 +84,26 @@ git push origin v2.0.0
 | `ANDROID_KEY_PASSWORD` | 密钥密码 |
 
 未配置正式签名 Secret 时，工作流使用开发签名，并在 Release 说明中标记 APK 为预览包。工作流在 Runner 临时目录生成签名文件，并在结束时清理。工作流使用 `GITHUB_TOKEN` 的 `contents: write` 权限，无需额外 PAT。
+
+## Android 应用内更新
+
+Android 在启动并确认后端地址后自动检查更新；应用回到前台时每隔至少 6 小时再次检查，也可在“设置 → 检查应用更新”手动触发。检查无需登录。网络异常、旧服务端或 Release 暂未发布时，自动检查静默跳过。版本不同会显示当前版本、服务端版本和下载大小，用户确认后才开始下载。下载期间请保留应用，失败可重试。
+
+版本匹配使用完整 Git commit 和 APK 实际 `versionCode`。Pipeline 为 APK 发布 `android-update.json`，其中记录 commit、显示版本、versionCode、文件名、大小和 SHA-256；Docker 镜像写入同一 commit 及 Release 标签。服务端只选择**与自身代码版本匹配**的 Release（默认分支为 `ci-<完整 commit SHA>`，标签构建为同名 Release），避免获取其他分支或尚未部署的新客户端。Pipeline 先完成 APK Release 发布，再发布 Docker 镜像和部署服务器。
+
+- `GET /api/v1/updates/android`：返回目标 APK 版本信息；未配置版本的开发服务返回 `enabled: false`。版本信息成功缓存 5 分钟、查询失败缓存 30 秒。
+- `GET /api/v1/updates/android/download?sha256=<清单中的校验值>`：首次下载时服务端从 GitHub 获取 APK，验证大小和 SHA-256 后缓存到数据目录的 `updates/`，再转发给客户端。并发下载共用缓存，支持 Range 请求，只保留当前安装包。版本已变化时返回 409，客户端需重新检查更新。
+
+客户端仅访问已配置的后端，不直接连接 GitHub。客户端再次校验大小和 SHA-256，并检查包名、versionCode 和签名，再打开系统安装界面；Android 8 及以上首次安装需按系统提示允许该应用安装更新包。用户取消安装后可点击“安装更新”重试。服务端版本低于已安装 APK 的 versionCode 时提示升级服务端，避免尝试覆盖安装旧版本。更新不会静默安装。
+
+Pipeline 构建的镜像无需额外配置。私有仓库或需要提高 GitHub API 限额时可设置：
+
+| 环境变量 | 用途 |
+|---|---|
+| `FOODDIARY_UPDATE_REPOSITORY` | APK 所在 GitHub 仓库，默认 `JesseTzh/FoodDiary` |
+| `FOODDIARY_GITHUB_TOKEN` | 仅保存在服务端、可读取目标仓库 Releases 的 Token，公开仓库可不设置 |
+| `FOODDIARY_UPDATE_TAG` | 覆盖目标 Release 标签；镜像内有 commit 时清单仍须匹配该 commit |
+
+自行构建镜像时传入 `--build-arg BUILD_COMMIT="$(git rev-parse HEAD)" --build-arg BUILD_RELEASE_TAG="ci-$(git rev-parse HEAD)"`；该 Release 必须包含 Pipeline 生成的清单与 APK。`make backend` 会写入当前 Git commit，默认选择对应 `ci-<commit>` Release；直接运行 Go 的开发服务可设置 `FOODDIARY_UPDATE_TAG` 来测试指定 Release。旧 Release 没有清单，需通过新 Pipeline 重新构建。
+
+覆盖安装要求始终使用同一正式签名密钥，并保持 versionCode 递增（Pipeline 使用 `GITHUB_RUN_NUMBER`）。不同 Runner 自动生成的开发签名可能不同，不能依赖开发签名实现跨版本更新。签名不匹配时客户端会显示失败原因，保留原应用。已经安装的旧 APK 没有更新功能，需要先手动安装一次包含本功能、签名兼容的新 APK。

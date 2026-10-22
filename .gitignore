@@ -55,3 +55,5 @@ node_modules/
 web-startup-artifacts/
 android-startup-artifacts/
 mock-page-artifacts/
+
+frontend/build-version.txt

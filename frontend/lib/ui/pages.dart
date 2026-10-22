@@ -10,6 +10,7 @@ import 'theme.dart';
 import 'image_upload.dart';
 import 'cropped_photo.dart';
 import '../version.dart';
+import 'app_update.dart';
 
 /// Reads JPEG EXIF dates, preferring capture time over digitization/edit time.
 DateTime? imageDateFromBytes(Uint8List bytes) => _jpegExifDate(bytes);
@@ -2012,6 +2013,23 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
         ),
+        if (widget.api.canConfigureServer) ...[
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.system_update_outlined),
+            label: const Text('检查应用更新'),
+            onPressed: busy
+                ? null
+                : () async {
+                    setState(() => busy = true);
+                    try {
+                      await checkForAppUpdate(context, widget.api);
+                    } finally {
+                      if (mounted) setState(() => busy = false);
+                    }
+                  },
+          ),
+        ],
         const SizedBox(height: 24),
         OutlinedButton(
           onPressed: busy || widget.offline

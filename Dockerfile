@@ -13,12 +13,14 @@ COPY frontend ./
 COPY scripts/build-pwa.py /app/scripts/build-pwa.py
 RUN flutter build web --release --no-web-resources-cdn && python3 /app/scripts/build-pwa.py
 FROM golang:1.26-alpine AS backend
+ARG BUILD_COMMIT
+ARG BUILD_RELEASE_TAG
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY backend ./backend
-RUN go build -trimpath -o /fooddiary ./backend/cmd/server
+RUN go build -trimpath -ldflags "-X main.buildCommit=${BUILD_COMMIT} -X main.buildReleaseTag=${BUILD_RELEASE_TAG}" -o /fooddiary ./backend/cmd/server
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 WORKDIR /app

@@ -71,6 +71,7 @@ type Media struct {
 	CropHeight float64 `json:"crop_height,omitempty"`
 }
 type App struct {
+	updater *androidUpdater
 	db      *sql.DB
 	data    string
 	jwtKey  []byte
@@ -1007,6 +1008,8 @@ func routes(a *App) http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	})
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/updates/android", a.androidUpdate)
+		r.Get("/updates/android/download", a.androidDownload)
 		r.Get("/auth/status", a.authStatus)
 		r.Post("/auth/setup", a.authSetup)
 		r.Post("/auth/login", a.authLogin)
@@ -1089,7 +1092,7 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	a := &App{db: db, data: data, jwtKey: key, limiter: newIPLimiter()}
+	a := &App{db: db, data: data, jwtKey: key, limiter: newIPLimiter(), updater: newAndroidUpdater(data)}
 	if v := os.Getenv("FOODDIARY_CORS_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {

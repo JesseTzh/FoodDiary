@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'data/api.dart';
 import 'data/models.dart';
 import 'ui/theme.dart';
+import 'ui/app_update.dart';
 import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
 import 'ui/server_configuration_page.dart';
@@ -84,6 +85,17 @@ class Kitchen extends StatefulWidget {
 
 class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
   Timer? _dayTimer;
+  DateTime? _lastUpdateCheck;
+
+  void _checkUpdate() {
+    final last = _lastUpdateCheck;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(hours: 6)) {
+      return;
+    }
+    _lastUpdateCheck = DateTime.now();
+    unawaited(checkForAppUpdate(context, api, automatic: true));
+  }
 
   void _scheduleDayChange() {
     _dayTimer?.cancel();
@@ -100,6 +112,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       setState(() {});
       _scheduleDayChange();
+      _checkUpdate();
     }
   }
 
@@ -124,6 +137,9 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _scheduleDayChange();
     refresh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkUpdate();
+    });
   }
 
   Future<void> refresh() async {

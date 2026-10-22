@@ -5,7 +5,7 @@ build: web backend
 web:
 	./scripts/build-web.sh
 backend:
-	go build -o fooddiary ./backend/cmd/server
+	go build -ldflags "-X main.buildCommit=$(shell git rev-parse HEAD)" -o fooddiary ./backend/cmd/server
 check:
 	go vet ./...
 	cd frontend && $(FLUTTER) analyze

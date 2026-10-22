@@ -30,6 +30,7 @@ android {
             storePassword = signingProperties["storePassword"] as String
         }
     }
+    buildFeatures { buildConfig = true }
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName(if (signingFile.exists()) "release" else "debug")
@@ -42,3 +43,5 @@ kotlin {
     }
 }
 flutter { source = "../.." }
+
+dependencies { implementation("androidx.core:core:1.15.0") }
