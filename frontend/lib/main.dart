@@ -471,11 +471,13 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
             children: [
               Row(
                 children: [
-                  Text(
-                    '$date   周$weekday',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                  Flexible(
+                    child: Text(
+                      '$date   周$weekday',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -558,6 +560,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
               children: [
                 Text(
                   r.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
@@ -566,6 +570,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                 const SizedBox(height: 7),
                 Text(
                   r.description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: muted, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
@@ -614,7 +620,9 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         api: api,
         path: photo?['url'] as String?,
         width: width,
-        height: height ?? 220,
+        height: height,
+        radius: radius,
+        crop: cropFromMedia(photo),
       ),
     );
   }
@@ -687,11 +695,41 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DishPhoto(
-              api: api,
-              path: e.photos.isEmpty ? null : e.photos.first,
-              width: 100,
-              height: 112,
+            Stack(
+              children: [
+                DishPhoto(
+                  api: api,
+                  path: e.photos.isEmpty ? null : e.photos.first,
+                  crop: e.photoCrops.isEmpty ? null : e.photoCrops.first,
+                  width: 112,
+                  height: 112,
+                  radius: 14,
+                ),
+                if (e.photos.length > 1)
+                  Positioned(
+                    bottom: 7,
+                    right: 7,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          '▧ ${e.photos.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -705,6 +743,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                   const SizedBox(height: 6),
                   Text(
                     e.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -725,14 +765,17 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                         style: const TextStyle(fontSize: 16),
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        moodDescriptions[e.mood.clamp(0, 4)],
-                        style: const TextStyle(
-                          color: Color(0xFFD6A77A),
-                          fontSize: 10,
+                      Expanded(
+                        child: Text(
+                          moodDescriptions[e.mood.clamp(0, 4)],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFD6A77A),
+                            fontSize: 10,
+                          ),
                         ),
                       ),
-                      const Spacer(),
                       Icon(
                         e.favorite ? Icons.favorite : Icons.favorite_border,
                         color: const Color(0xFFFF9184),
@@ -792,7 +835,10 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         if (filtered.isEmpty) empty('这里还没有菜谱', '试试其他分类，或添加你的拿手菜。'),
         LayoutBuilder(
           builder: (context, c) {
-            final cols = c.maxWidth > 650 ? 3 : 2;
+            final cols = (c.maxWidth / 180).floor().clamp(2, 5);
+            final cardWidth = (c.maxWidth - (cols - 1) * 14) / cols;
+            final textScale = MediaQuery.textScalerOf(context);
+            final infoHeight = textScale.scale(13) * 1.65 * 2 + 56;
             return GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -801,7 +847,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                 crossAxisCount: cols,
                 crossAxisSpacing: 14,
                 mainAxisSpacing: 16,
-                mainAxisExtent: c.maxWidth / cols * .7 + 83,
+                mainAxisExtent: cardWidth + infoHeight,
               ),
               itemBuilder: (context, i) {
                 final r = filtered[i];
@@ -814,22 +860,26 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
+                        AspectRatio(
+                          aspectRatio: 1,
                           child: recipeImage(
                             r,
                             width: double.infinity,
                             radius: 14,
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
-                          child: Text(
-                            r.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
+                        SizedBox(
+                          height: textScale.scale(13) * 1.65 * 2 + 10,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
+                            child: Text(
+                              r.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ),

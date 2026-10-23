@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +7,9 @@ import '../data/models.dart';
 import 'theme.dart';
 import 'image_upload.dart';
 import 'cropped_photo.dart';
+import 'dish_photo.dart';
+import 'photo_gallery.dart';
+export 'dish_photo.dart' show DishPhoto, cropFromMedia;
 import '../version.dart';
 import 'app_update.dart';
 
@@ -103,89 +104,6 @@ DateTime? _validDate(int year, int month, int day) {
           value.day == day
       ? value
       : null;
-}
-
-class DishPhoto extends StatelessWidget {
-  final Api api;
-  final String? path;
-  final double? width;
-  final double? height;
-  final Rect? crop;
-  const DishPhoto({
-    super.key,
-    required this.api,
-    this.path,
-    this.width,
-    this.height,
-    this.crop,
-  });
-  @override
-  Widget build(BuildContext context) {
-    final photo = path == null ? placeholder() : _photo();
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        width: width,
-        child: height == null
-            ? AspectRatio(aspectRatio: 16 / 9, child: photo)
-            : SizedBox(height: height, child: photo),
-      ),
-    );
-  }
-
-  Widget _photo() {
-    final ImageProvider provider;
-    if (api.mock && path!.startsWith('asset:')) {
-      provider = AssetImage(path!.substring(6));
-    } else if (api.mock && path!.startsWith('data:')) {
-      provider = MemoryImage(base64Decode(path!.split(',').last));
-    } else {
-      provider = NetworkImage(
-        api.url(path!),
-        headers: kIsWeb ? null : api.headers,
-      );
-    }
-    final selection = crop;
-    if (selection != null &&
-        (selection.width < .99 || selection.height < .99)) {
-      return CroppedPhoto(
-        image: provider,
-        crop: selection,
-        placeholder: (_) => placeholder(),
-      );
-    }
-    return Image(
-      image: provider,
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => placeholder(),
-      loadingBuilder: (_, child, progress) =>
-          progress == null ? child : placeholder(),
-    );
-  }
-
-  Widget placeholder() => Container(
-    color: const Color(0xFFFFEFD9),
-    child: const Center(
-      child: Icon(
-        Icons.ramen_dining_rounded,
-        color: Color(0xFFDBAC76),
-        size: 40,
-      ),
-    ),
-  );
-}
-
-Rect? cropFromMedia(dynamic media) {
-  if (media is! Map) return null;
-  final w = (media['crop_width'] as num?)?.toDouble() ?? 1;
-  final h = (media['crop_height'] as num?)?.toDouble() ?? 1;
-  if (w >= .99 && h >= .99) return null;
-  return Rect.fromLTWH(
-    (media['crop_x'] as num?)?.toDouble() ?? 0,
-    (media['crop_y'] as num?)?.toDouble() ?? 0,
-    w,
-    h,
-  );
 }
 
 class WelcomePage extends StatefulWidget {
@@ -613,8 +531,17 @@ class _RecordPageState extends State<RecordPage> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final path in widget.entry?.photos ?? <String>[])
-                  DishPhoto(api: widget.api, path: path, width: 76, height: 76),
+                for (var i = 0; i < (widget.entry?.photos.length ?? 0); i++)
+                  DishPhoto(
+                    api: widget.api,
+                    path: widget.entry!.photos[i],
+                    crop: widget.entry!.photoCrops.length > i
+                        ? widget.entry!.photoCrops[i]
+                        : null,
+                    width: 76,
+                    height: 76,
+                    radius: 12,
+                  ),
                 for (var i = 0; i < previews.length; i++)
                   Column(
                     mainAxisSize: MainAxisSize.min,
@@ -623,11 +550,15 @@ class _RecordPageState extends State<RecordPage> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.memory(
-                              previews[i],
+                            child: SizedBox(
                               width: 76,
                               height: 76,
-                              fit: BoxFit.cover,
+                              child: CroppedPhoto(
+                                image: MemoryImage(previews[i]),
+                                crop: fileCrops[i],
+                                placeholder: (_) =>
+                                    const ColoredBox(color: line),
+                              ),
                             ),
                           ),
                           if (savedId == null)
@@ -1107,7 +1038,6 @@ class DiaryPage extends StatefulWidget {
 
 class _DiaryPageState extends State<DiaryPage> {
   late Diary entry;
-  int photo = 0;
   bool busy = false;
   @override
   void initState() {
@@ -1195,18 +1125,32 @@ class _DiaryPageState extends State<DiaryPage> {
     ),
     body: PageBody(
       children: [
-        DishPhoto(
-          api: widget.api,
-          path: entry.photos.isEmpty ? null : entry.photos[photo],
-          crop: entry.photoCrops.isEmpty ? null : entry.photoCrops[photo],
-          width: double.infinity,
-        ),
-        const SizedBox(height: 22),
         Text(entry.date, style: const TextStyle(color: muted, fontSize: 12)),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Text(
           entry.title,
-          style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 18),
+        PhotoGallery(
+          key: ValueKey(entry.photos.join('|')),
+          api: widget.api,
+          paths: entry.photos,
+          crops: entry.photoCrops,
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Text(
+              moods[entry.mood.clamp(0, 4)],
+              style: const TextStyle(fontSize: 24),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              moodDescriptions[entry.mood.clamp(0, 4)],
+              style: const TextStyle(color: muted),
+            ),
+          ],
         ),
         if (entry.dishes.length > 1) ...[
           const SizedBox(height: 12),
@@ -1227,41 +1171,6 @@ class _DiaryPageState extends State<DiaryPage> {
           style: const TextStyle(height: 2, fontSize: 15),
         ),
         const SizedBox(height: 24),
-        if (entry.photos.length > 1) ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: List.generate(
-                entry.photos.length,
-                (i) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: InkWell(
-                    onTap: () => setState(() => photo = i),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: photo == i ? orange : Colors.transparent,
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: DishPhoto(
-                        api: widget.api,
-                        path: entry.photos[i],
-                        crop: entry.photoCrops.length > i
-                            ? entry.photoCrops[i]
-                            : null,
-                        width: 78,
-                        height: 78,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-        ],
         label('标签'),
         Wrap(
           spacing: 8,
@@ -1271,17 +1180,6 @@ class _DiaryPageState extends State<DiaryPage> {
               : entry.tags.map((t) => Tag(t)).toList(),
         ),
         const SizedBox(height: 22),
-        label('心情'),
-        Row(
-          children: [
-            Text(
-              moods[entry.mood.clamp(0, 4)],
-              style: const TextStyle(fontSize: 32),
-            ),
-            const SizedBox(width: 10),
-            Text(moodDescriptions[entry.mood.clamp(0, 4)]),
-          ],
-        ),
         const SizedBox(height: 30),
         Row(
           children: [
@@ -1399,6 +1297,100 @@ class _RecipePageState extends State<RecipePage> {
     }
   }
 
+  Future<void> managePhotos() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, updateSheet) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * .7,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '菜谱照片',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('点击照片设为封面', style: TextStyle(color: muted)),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: photos
+                        .map(
+                          (p) => Semantics(
+                            label: '设为封面',
+                            selected: p['id'] == coverMediaId,
+                            child: InkWell(
+                              onTap: busy
+                                  ? null
+                                  : () async {
+                                      updateSheet(() => busy = true);
+                                      try {
+                                        await selectCover(p['id']);
+                                      } finally {
+                                        if (mounted) {
+                                          setState(() => busy = false);
+                                        }
+                                        if (sheetContext.mounted) {
+                                          updateSheet(() {});
+                                        }
+                                      }
+                                    },
+                              child: Stack(
+                                children: [
+                                  DishPhoto(
+                                    api: widget.api,
+                                    path: p['url'],
+                                    crop: cropFromMedia(p),
+                                    width: 76,
+                                    height: 76,
+                                    radius: 12,
+                                  ),
+                                  if (p['id'] == coverMediaId)
+                                    const Positioned(
+                                      right: 3,
+                                      top: 3,
+                                      child: Icon(
+                                        Icons.check_circle,
+                                        color: orange,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: busy
+                        ? null
+                        : () async {
+                            updateSheet(() => busy = true);
+                            await uploadPhotos();
+                            if (sheetContext.mounted) updateSheet(() {});
+                          },
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(busy ? '正在处理…' : '上传菜谱图片'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> removeRecipe() async {
     final yes = await showDialog<bool>(
       context: context,
@@ -1443,6 +1435,11 @@ class _RecipePageState extends State<RecipePage> {
         title: const Text('今日菜谱'),
         actions: [
           IconButton(
+            tooltip: '管理照片',
+            onPressed: widget.offline || busy ? null : managePhotos,
+            icon: const Icon(Icons.photo_library_outlined),
+          ),
+          IconButton(
             tooltip: '删除菜谱',
             onPressed: widget.offline || busy || !recipe.custom
                 ? null
@@ -1482,73 +1479,29 @@ class _RecipePageState extends State<RecipePage> {
       ),
       body: PageBody(
         children: [
-          if (coverMediaId != null &&
-              photos.any((p) => p['id'] == coverMediaId))
-            DishPhoto(
-              api: widget.api,
-              path: photos.firstWhere((p) => p['id'] == coverMediaId)['url'],
-              crop: cropFromMedia(
-                photos.firstWhere((p) => p['id'] == coverMediaId),
-              ),
-            )
-          else
-            DishPhoto(
-              api: widget.api,
-              path: photos.isEmpty ? null : photos.last['url'] as String,
-              crop: photos.isEmpty ? null : cropFromMedia(photos.last),
-            ),
-          const SizedBox(height: 24),
           Text(
             r.title,
             style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 10),
-          Text(r.description, style: const TextStyle(color: muted)),
-          const SizedBox(height: 14),
           Align(alignment: Alignment.centerLeft, child: Tag(r.category)),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: widget.offline || busy ? null : uploadPhotos,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            label: Text(busy ? '正在处理…' : '上传菜谱图片'),
-          ),
-          if (photos.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            label('菜谱照片（点击设为封面）'),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: photos
-                  .map(
-                    (p) => InkWell(
-                      onTap: widget.offline || busy
-                          ? null
-                          : () => selectCover(p['id']),
-                      child: Stack(
-                        children: [
-                          DishPhoto(
-                            api: widget.api,
-                            path: p['url'],
-                            width: 76,
-                            height: 76,
-                          ),
-                          if (p['id'] == coverMediaId)
-                            const Positioned(
-                              right: 2,
-                              top: 2,
-                              child: Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  )
-                  .toList(),
+          const SizedBox(height: 18),
+          PhotoGallery(
+            key: ValueKey(
+              '${photos.map((p) => p['url']).join('|')}:$coverMediaId',
             ),
+            api: widget.api,
+            paths: photos.map((p) => p['url'] as String).toList(),
+            crops: photos.map(cropFromMedia).toList(),
+            initialIndex: photos.indexWhere((p) => p['id'] == coverMediaId) >= 0
+                ? photos.indexWhere((p) => p['id'] == coverMediaId)
+                : (photos.isEmpty ? 0 : photos.length - 1),
+          ),
+          if (r.description.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text(r.description, style: const TextStyle(color: muted)),
           ],
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           label('准备食材'),
           CozyCard(
             child: Column(
@@ -1741,6 +1694,7 @@ class _NewRecipePageState extends State<NewRecipePage> {
                   (p) => DishPhoto(
                     api: widget.api,
                     path: p['url'],
+                    crop: cropFromMedia(p),
                     width: 76,
                     height: 76,
                   ),
@@ -1758,11 +1712,14 @@ class _NewRecipePageState extends State<NewRecipePage> {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.memory(
-                        p.value,
-                        width: 90,
-                        height: 90,
-                        fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: CroppedPhoto(
+                          image: MemoryImage(p.value),
+                          crop: fileCrops[p.key],
+                          placeholder: (_) => const ColoredBox(color: line),
+                        ),
                       ),
                     ),
                     if (p.key >= uploaded)
@@ -1887,7 +1844,19 @@ class CollectionPage extends StatelessWidget {
                   api: api,
                   path: r.photos.isEmpty
                       ? null
-                      : r.photos.last['url'] as String,
+                      : (r.photos.firstWhere(
+                              (p) => p['id'] == r.coverMediaId,
+                              orElse: () => r.photos.last,
+                            )['url']
+                            as String),
+                  crop: r.photos.isEmpty
+                      ? null
+                      : cropFromMedia(
+                          r.photos.firstWhere(
+                            (p) => p['id'] == r.coverMediaId,
+                            orElse: () => r.photos.last,
+                          ),
+                        ),
                   width: 56,
                   height: 56,
                 ),
@@ -1914,6 +1883,7 @@ class CollectionPage extends StatelessWidget {
                 leading: DishPhoto(
                   api: api,
                   path: e.photos.isEmpty ? null : e.photos.first,
+                  crop: e.photoCrops.isEmpty ? null : e.photoCrops.first,
                   width: 56,
                   height: 56,
                 ),

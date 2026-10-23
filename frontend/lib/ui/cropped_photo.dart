@@ -81,11 +81,15 @@ class _CropPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final image = info.image;
+    final square = squarePhotoCrop(
+      crop,
+      Size(image.width.toDouble(), image.height.toDouble()),
+    );
     final selection = Rect.fromLTWH(
-      crop.left * image.width,
-      crop.top * image.height,
-      crop.width * image.width,
-      crop.height * image.height,
+      square.left * image.width,
+      square.top * image.height,
+      square.width * image.width,
+      square.height * image.height,
     );
     final fitted = applyBoxFit(BoxFit.cover, selection.size, size);
     final source = Alignment.center.inscribe(fitted.source, selection);
@@ -100,4 +104,23 @@ class _CropPainter extends CustomPainter {
   @override
   bool shouldRepaint(_CropPainter oldDelegate) =>
       info != oldDelegate.info || crop != oldDelegate.crop;
+}
+
+/// Keeps a square selection intact and expands legacy landscape crops using
+/// pixels from the uploaded image, without changing the stored coordinates.
+Rect squarePhotoCrop(Rect crop, Size image) {
+  final pixelWidth = crop.width * image.width;
+  final pixelHeight = crop.height * image.height;
+  final side = (pixelWidth > pixelHeight ? pixelWidth : pixelHeight).clamp(
+    1.0,
+    image.shortestSide,
+  );
+  final width = side / image.width;
+  final height = side / image.height;
+  return Rect.fromLTWH(
+    (crop.center.dx - width / 2).clamp(0.0, 1.0 - width),
+    (crop.center.dy - height / 2).clamp(0.0, 1.0 - height),
+    width,
+    height,
+  );
 }

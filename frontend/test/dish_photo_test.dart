@@ -10,7 +10,7 @@ import 'package:fooddiary/ui/theme.dart';
 
 void main() {
   for (final width in [320.0, 390.0, 768.0, 1440.0]) {
-    testWidgets('cover adapts to page width $width with 16:9 ratio', (
+    testWidgets('cover adapts to page width $width with 1:1 ratio', (
       tester,
     ) async {
       tester.view.physicalSize = Size(width, 900);
@@ -33,7 +33,7 @@ void main() {
         ),
       );
       final cover = tester.getRect(find.byType(DishPhoto).first);
-      expect(cover.width / cover.height, closeTo(16 / 9, .001));
+      expect(cover.width / cover.height, closeTo(1, .001));
       expect(
         tester.getRect(find.text('正文')).top,
         closeTo(cover.bottom + 24, .001),
@@ -42,6 +42,29 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  test('legacy crop expands around its center using the uploaded image', () {
+    final crop = squarePhotoCrop(
+      const Rect.fromLTWH(.1, .2, .8, .3),
+      const Size(1000, 1200),
+    );
+    expect(crop.width * 1000, closeTo(800, .001));
+    expect(crop.height * 1200, closeTo(800, .001));
+    expect(crop.center.dx, closeTo(.5, .001));
+    expect(crop.center.dy, closeTo(.35, .001));
+    expect(crop.top, greaterThanOrEqualTo(0));
+    expect(crop.bottom, lessThanOrEqualTo(1));
+  });
+
+  test('legacy crop remains inside the original image near an edge', () {
+    final crop = squarePhotoCrop(
+      const Rect.fromLTWH(.3, .8, .7, .2),
+      const Size(1200, 800),
+    );
+    expect(crop.width * 1200 / (crop.height * 800), closeTo(1, .001));
+    expect(crop.right, lessThanOrEqualTo(1));
+    expect(crop.bottom, closeTo(1, .001));
+  });
 
   testWidgets('cover renders the selected region of the original image', (
     tester,
@@ -67,7 +90,7 @@ void main() {
             api: Api(mock: true),
             path:
                 'data:image/png;base64,${base64Encode(bytes!.buffer.asUint8List())}',
-            crop: const Rect.fromLTWH(.5, 0, .5, 1),
+            crop: const Rect.fromLTWH(.5, 0, .5, .5),
           ),
         ),
       ),

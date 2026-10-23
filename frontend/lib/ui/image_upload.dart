@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -88,15 +89,16 @@ class ImageCropDialog extends StatefulWidget {
 }
 
 class _CropDialogState extends State<ImageCropDialog> {
-  // The cover is a 16:9 frame; coordinates stay normalized so the original
+  // The cover is a square frame; coordinates stay normalized so the original
   // file remains untouched and the same selection works on every viewport.
   late Rect crop;
+  double scale = .9;
 
   @override
   void initState() {
     super.initState();
     final aspect = widget.imageSize.aspectRatio;
-    const coverAspect = 16 / 9;
+    const coverAspect = 1.0;
     final width = aspect > coverAspect ? .9 * coverAspect / aspect : .9;
     final height = aspect > coverAspect ? .9 : .9 * aspect / coverAspect;
     crop = Rect.fromLTWH((1 - width) / 2, (1 - height) / 2, width, height);
@@ -118,55 +120,95 @@ class _CropDialogState extends State<ImageCropDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('调整头图范围'),
-    content: SizedBox(
-      width: 320,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = applyBoxFit(
-            BoxFit.contain,
-            widget.imageSize,
-            Size(constraints.maxWidth, MediaQuery.sizeOf(context).height * .45),
-          ).destination;
-          return Center(
-            heightFactor: 1,
-            child: SizedBox(
-              width: size.width,
-              height: size.height,
-              child: GestureDetector(
-                onPanStart: (d) {
-                  down = d.localPosition;
-                  start = crop;
-                },
-                onPanUpdate: (d) => move(d, size),
-                onPanEnd: (_) {
-                  down = null;
-                  start = null;
-                },
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.memory(widget.bytes, fit: BoxFit.contain),
-                    CustomPaint(painter: _CropPainter(crop)),
-                    Positioned.fromRect(
-                      rect: Rect.fromLTWH(
-                        crop.left * size.width,
-                        crop.top * size.height,
-                        crop.width * size.width,
-                        crop.height * size.height,
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
+    title: const Text('调整方形封面'),
+    content: SingleChildScrollView(
+      child: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('拖动选框调整位置，滑动下方滑杆缩放', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final size = applyBoxFit(
+                  BoxFit.contain,
+                  widget.imageSize,
+                  Size(
+                    constraints.maxWidth,
+                    math.min(
+                      MediaQuery.sizeOf(context).height * .45,
+                      math.max(64, MediaQuery.sizeOf(context).height - 320),
+                    ),
+                  ),
+                ).destination;
+                return Center(
+                  heightFactor: 1,
+                  child: SizedBox(
+                    width: size.width,
+                    height: size.height,
+                    child: GestureDetector(
+                      onPanStart: (d) {
+                        down = d.localPosition;
+                        start = crop;
+                      },
+                      onPanUpdate: (d) => move(d, size),
+                      onPanEnd: (_) {
+                        down = null;
+                        start = null;
+                      },
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.memory(widget.bytes, fit: BoxFit.contain),
+                          CustomPaint(painter: _CropPainter(crop)),
+                          Positioned.fromRect(
+                            rect: Rect.fromLTWH(
+                              crop.left * size.width,
+                              crop.top * size.height,
+                              crop.width * size.width,
+                              crop.height * size.height,
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             ),
-          );
-        },
+            Slider(
+              value: scale,
+              min: .25,
+              max: 1,
+              label: '${(1 / scale).toStringAsFixed(1)} 倍',
+              semanticFormatterCallback: (value) =>
+                  '缩放 ${(1 / value).toStringAsFixed(1)} 倍',
+              onChanged: (value) {
+                final side = widget.imageSize.shortestSide * value;
+                final width = side / widget.imageSize.width;
+                final height = side / widget.imageSize.height;
+                setState(() {
+                  scale = value;
+                  crop = Rect.fromLTWH(
+                    (crop.center.dx - width / 2).clamp(0.0, 1.0 - width),
+                    (crop.center.dy - height / 2).clamp(0.0, 1.0 - height),
+                    width,
+                    height,
+                  );
+                });
+              },
+            ),
+          ],
+        ),
       ),
     ),
     actions: [
