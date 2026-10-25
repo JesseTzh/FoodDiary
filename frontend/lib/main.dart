@@ -208,8 +208,11 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
   }
 
   Future<void> open(Widget page) async {
+    final revision = api.dataRevision;
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-    if (mounted) await refresh();
+    if (mounted && authenticated && api.dataRevision != revision) {
+      await refresh();
+    }
   }
 
   void record([Diary? entry]) {
@@ -266,7 +269,12 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
               child: RefreshIndicator(
                 onRefresh: refresh,
                 color: orange,
-                child: [home(), diary(), cookbook(), mine()][tab],
+                child: switch (tab) {
+                  0 => home(),
+                  1 => diary(),
+                  2 => cookbook(),
+                  _ => mine(),
+                },
               ),
             ),
             if (loading)
@@ -614,16 +622,13 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
       }
     }
     photo ??= recipe.photos.isEmpty ? null : recipe.photos.last as Map;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: DishPhoto(
-        api: api,
-        path: photo?['url'] as String?,
-        width: width,
-        height: height,
-        radius: radius,
-        crop: cropFromMedia(photo),
-      ),
+    return DishPhoto(
+      api: api,
+      path: photo?['url'] as String?,
+      width: width,
+      height: height,
+      radius: radius,
+      crop: cropFromMedia(photo),
     );
   }
 
@@ -638,47 +643,64 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                   e.tags.any((t) => t.contains(search))),
         )
         .toList();
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 96),
-      children: [
-        heading(
-          '日记',
-          trailing: const Icon(Icons.auto_stories_outlined, color: muted),
-        ),
-        TextField(
-          onChanged: (v) => setState(() => search = v),
-          decoration: const InputDecoration(
-            hintText: '寻找某一道菜，或一段回忆…',
-            prefixIcon: Icon(Icons.search, size: 21),
+    return CustomScrollView(
+      key: const PageStorageKey('diary'),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          sliver: SliverList.list(
+            children: [
+              heading(
+                '日记',
+                trailing: const Icon(Icons.auto_stories_outlined, color: muted),
+              ),
+              TextField(
+                onChanged: (v) => setState(() => search = v),
+                decoration: const InputDecoration(
+                  hintText: '寻找某一道菜，或一段回忆…',
+                  prefixIcon: Icon(Icons.search, size: 21),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: ['全部', ...months]
+                      .map(
+                        (m) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Tag(
+                            m == '全部'
+                                ? m
+                                : '${int.parse(m.substring(5))}月 · ${m.substring(0, 4)}',
+                            selected: month == m,
+                            onTap: () => setState(() => month = m),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+              const SizedBox(height: 22),
+              if (filtered.isEmpty)
+                empty(
+                  '还没有这段美味回忆',
+                  '从今天的第一顿饭开始吧。',
+                  action: '记录做饭',
+                  onTap: record,
+                ),
+            ],
           ),
         ),
-        const SizedBox(height: 18),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: ['全部', ...months]
-                .map(
-                  (m) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Tag(
-                      m == '全部'
-                          ? m
-                          : '${int.parse(m.substring(5))}月 · ${m.substring(0, 4)}',
-                      selected: month == m,
-                      onTap: () => setState(() => month = m),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-        const SizedBox(height: 22),
-        if (filtered.isEmpty)
-          empty('还没有这段美味回忆', '从今天的第一顿饭开始吧。', action: '记录做饭', onTap: record),
-        ...filtered.map(
-          (e) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: entryCard(e),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 96),
+          sliver: SliverList.builder(
+            itemCount: filtered.length,
+            itemBuilder: (context, index) => Padding(
+              key: ValueKey(filtered[index].id),
+              padding: const EdgeInsets.only(bottom: 14),
+              child: entryCard(filtered[index]),
+            ),
           ),
         ),
       ],
@@ -799,126 +821,138 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
               r.title.contains(search),
         )
         .toList();
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 96),
-      children: [
-        heading(
-          '菜谱',
-          trailing: const Icon(Icons.restaurant_menu_outlined, color: muted),
-        ),
-        TextField(
-          onChanged: (v) => setState(() => search = v),
-          decoration: const InputDecoration(
-            hintText: '搜索菜谱…',
-            prefixIcon: Icon(Icons.search, size: 20),
-          ),
-        ),
-        const SizedBox(height: 16),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: categories
-                .map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Tag(
-                      c,
-                      selected: c == category,
-                      onTap: () => setState(() => category = c),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-        const SizedBox(height: 22),
-        if (filtered.isEmpty) empty('这里还没有菜谱', '试试其他分类，或添加你的拿手菜。'),
-        LayoutBuilder(
-          builder: (context, c) {
-            final cols = (c.maxWidth / 180).floor().clamp(2, 5);
-            final cardWidth = (c.maxWidth - (cols - 1) * 14) / cols;
-            final textScale = MediaQuery.textScalerOf(context);
-            final infoHeight = textScale.scale(13) * 1.65 * 2 + 56;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: filtered.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cols,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 16,
-                mainAxisExtent: cardWidth + infoHeight,
+    return CustomScrollView(
+      key: const PageStorageKey('cookbook'),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          sliver: SliverList.list(
+            children: [
+              heading(
+                '菜谱',
+                trailing: const Icon(
+                  Icons.restaurant_menu_outlined,
+                  color: muted,
+                ),
               ),
-              itemBuilder: (context, i) {
-                final r = filtered[i];
-                return InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () =>
-                      open(RecipePage(api: api, recipe: r, offline: offline)),
-                  child: CozyCard(
-                    padding: const EdgeInsets.all(6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        AspectRatio(
-                          aspectRatio: 1,
-                          child: recipeImage(
-                            r,
-                            width: double.infinity,
-                            radius: 14,
+              TextField(
+                onChanged: (v) => setState(() => search = v),
+                decoration: const InputDecoration(
+                  hintText: '搜索菜谱…',
+                  prefixIcon: Icon(Icons.search, size: 20),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: categories
+                      .map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Tag(
+                            c,
+                            selected: c == category,
+                            onTap: () => setState(() => category = c),
                           ),
                         ),
-                        SizedBox(
-                          height: textScale.scale(13) * 1.65 * 2 + 10,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
-                            child: Text(
-                              r.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
+                      )
+                      .toList(),
+                ),
+              ),
+              const SizedBox(height: 22),
+              if (filtered.isEmpty) empty('这里还没有菜谱', '试试其他分类，或添加你的拿手菜。'),
+            ],
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 96),
+          sliver: SliverLayoutBuilder(
+            builder: (context, c) {
+              final cols = (c.crossAxisExtent / 180).floor().clamp(2, 5);
+              final cardWidth = (c.crossAxisExtent - (cols - 1) * 14) / cols;
+              final textScale = MediaQuery.textScalerOf(context);
+              final infoHeight = textScale.scale(13) * 1.65 * 2 + 56;
+              return SliverGrid.builder(
+                itemCount: filtered.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 16,
+                  mainAxisExtent: cardWidth + infoHeight,
+                ),
+                itemBuilder: (context, i) {
+                  final r = filtered[i];
+                  return InkWell(
+                    key: ValueKey(r.id),
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () =>
+                        open(RecipePage(api: api, recipe: r, offline: offline)),
+                    child: CozyCard(
+                      padding: const EdgeInsets.all(6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          AspectRatio(
+                            aspectRatio: 1,
+                            child: recipeImage(
+                              r,
+                              width: double.infinity,
+                              radius: 14,
                             ),
                           ),
-                        ),
-                        Row(
-                          children: [
-                            const SizedBox(width: 8),
-                            Expanded(
+                          SizedBox(
+                            height: textScale.scale(13) * 1.65 * 2 + 10,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
                               child: Text(
-                                r.category,
+                                r.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 10,
-                                  color: muted,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
                                 ),
                               ),
                             ),
-                            SizedBox(
-                              height: 36,
-                              child: IconButton(
-                                onPressed: offline
-                                    ? null
-                                    : () => favoriteRecipe(r),
-                                icon: Icon(
-                                  r.favorite
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: const Color(0xFFFF9581),
-                                  size: 18,
+                          ),
+                          Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  r.category,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: muted,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                              SizedBox(
+                                height: 36,
+                                child: IconButton(
+                                  onPressed: offline
+                                      ? null
+                                      : () => favoriteRecipe(r),
+                                  icon: Icon(
+                                    r.favorite
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: const Color(0xFFFF9581),
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            );
-          },
+                  );
+                },
+              );
+            },
+          ),
         ),
       ],
     );

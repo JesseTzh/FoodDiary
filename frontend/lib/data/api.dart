@@ -25,6 +25,11 @@ class Api {
   final FlutterSecureStorage secureStorage = const FlutterSecureStorage();
   Future<bool>? _refreshing;
   int _tokenGeneration = 0;
+  int _dataRevision = 0;
+
+  /// Changes only after successful data writes, including photo uploads.
+  /// A caller can compare this across nested routes, even after a partial save.
+  int get dataRevision => _dataRevision;
   bool get canConfigureServer =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android && !mock;
   bool get needsServerConfiguration =>
@@ -186,6 +191,15 @@ class Api {
   }
 
   Future<dynamic> request(String method, String path, [Object? body]) async {
+    final result = await _request(method, path, body);
+    if (const {'POST', 'PUT', 'PATCH', 'DELETE'}.contains(method) &&
+        !path.startsWith('/auth/')) {
+      _dataRevision++;
+    }
+    return result;
+  }
+
+  Future<dynamic> _request(String method, String path, Object? body) async {
     if (mock) return _mockStore!.request(method, path, body);
     final canRefresh = !path.startsWith('/auth/') || path == '/auth/status';
     if (canRefresh) await _ensureAccess();
@@ -221,7 +235,9 @@ class Api {
     Rect? crop,
   }) async {
     if (mock) {
-      return _mockStore!.upload(id, file, recipeId: recipeId, crop: crop);
+      await _mockStore!.upload(id, file, recipeId: recipeId, crop: crop);
+      _dataRevision++;
+      return;
     }
     await _ensureAccess();
     final bytes = await file.readAsBytes();
@@ -265,6 +281,7 @@ class Api {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       throw ApiError(res.statusCode, data['error']?['message'] ?? '照片上传失败');
     }
+    _dataRevision++;
   }
 
   Future<void> _clearTokens() async {

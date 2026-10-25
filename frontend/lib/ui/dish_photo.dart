@@ -51,8 +51,8 @@ class DishPhoto extends StatelessWidget {
       image: provider,
       fit: BoxFit.cover,
       errorBuilder: (_, _, _) => placeholder(),
-      loadingBuilder: (_, child, progress) =>
-          progress == null ? child : placeholder(),
+      frameBuilder: (_, child, frame, synchronous) =>
+          synchronous || frame != null ? child : placeholder(),
     );
   }
 

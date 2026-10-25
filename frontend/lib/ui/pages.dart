@@ -714,16 +714,9 @@ class _RecordPageState extends State<RecordPage> {
         children: [
           if (step != 2) _photoStep(),
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 420),
-            transitionBuilder: (child, animation) => SizeTransition(
-              sizeFactor: CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-              ),
-              axis: Axis.vertical,
-              alignment: Alignment.topCenter,
-              child: FadeTransition(opacity: animation, child: child),
-            ),
+            duration: const Duration(milliseconds: 220),
+            transitionBuilder: (child, animation) =>
+                FadeTransition(opacity: animation, child: child),
             child: step == 0
                 ? const SizedBox.shrink()
                 : step == 2
@@ -1046,12 +1039,14 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   Future<void> edit() async {
+    final revision = widget.api.dataRevision;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => RecordPage(api: widget.api, entry: entry),
       ),
     );
+    if (!mounted || widget.api.dataRevision == revision) return;
     try {
       final value = await widget.api.request('GET', '/entries/${entry.id}');
       if (mounted) setState(() => entry = Diary(value));
