@@ -46,6 +46,7 @@ build/
 frontend/android/local.properties
 frontend/android/.gradle/
 frontend/android/key.properties
+frontend/android/release-secrets.txt
 **/GeneratedPluginRegistrant.*
 frontend/lib/generated_plugin_registrant.dart
 *.jks

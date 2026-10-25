@@ -222,7 +222,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BUILD_ARGS=(--release --build-number="$GITHUB_RUN_NUMBER")
+          BUILD_ARGS=(--release)
           if [[ -n "$API_BASE_URL" ]]; then
             [[ "$API_BASE_URL" == https://* ]] || { echo '发布包默认服务地址必须使用 HTTPS'; exit 1; }
             BUILD_ARGS+=(--dart-define="API_BASE_URL=$API_BASE_URL")

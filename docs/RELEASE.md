@@ -106,4 +106,4 @@ Pipeline 构建的镜像无需额外配置。私有仓库或需要提高 GitHub 
 
 自行构建镜像时传入 `--build-arg BUILD_COMMIT="$(git rev-parse HEAD)" --build-arg BUILD_RELEASE_TAG="ci-$(git rev-parse HEAD)"`；该 Release 必须包含 Pipeline 生成的清单与 APK。`make backend` 会写入当前 Git commit，默认选择对应 `ci-<commit>` Release；直接运行 Go 的开发服务可设置 `FOODDIARY_UPDATE_TAG` 来测试指定 Release。旧 Release 没有清单，需通过新 Pipeline 重新构建。
 
-覆盖安装要求始终使用同一正式签名密钥，并保持 versionCode 递增（Pipeline 使用 `GITHUB_RUN_NUMBER`）。不同 Runner 自动生成的开发签名可能不同，不能依赖开发签名实现跨版本更新。签名不匹配时客户端会显示失败原因，保留原应用。已经安装的旧 APK 没有更新功能，需要先手动安装一次包含本功能、签名兼容的新 APK。
+覆盖安装要求始终使用同一正式签名密钥，并保持 versionCode 递增。统一构建脚本使用 UTC 时间戳（自 2000-01-01 起的秒数）生成 versionCode，以避免不同构建之间版本号倒退；Android 的整数上限在 2068 年前仍可满足。不同 Runner 自动生成的开发签名可能不同，不能依赖开发签名实现跨版本更新。签名不匹配时客户端会显示失败原因，保留原应用。已经安装的旧 APK 没有更新功能，需要先手动安装一次包含本功能、签名兼容的新 APK。
