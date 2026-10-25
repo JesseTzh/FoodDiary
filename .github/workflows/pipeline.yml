@@ -195,6 +195,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import base64
+          import binascii
           import os
           from pathlib import Path
           keys = ['KEYSTORE_BASE64', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD']
@@ -204,7 +205,15 @@ jobs:
           mode = 'development'
           if all(values):
               keystore = Path(os.environ['RUNNER_TEMP']) / 'fooddiary-release.jks'
-              keystore.write_bytes(base64.b64decode(values[0], validate=True))
+              # Secret 在网页上保存或复制时可能混入换行/空格，先剔除再解码
+              encoded = ''.join(values[0].split())
+              try:
+                  decoded = base64.b64decode(encoded, validate=True)
+              except (binascii.Error, ValueError) as error:
+                  raise SystemExit(f'ANDROID_KEYSTORE_BASE64 不是有效的 base64（已尝试剔除空白字符）：{error}，请用 `base64 keystore.jks | tr -d "\\n"` 重新生成并更新 Secret。')
+              if not decoded:
+                  raise SystemExit('ANDROID_KEYSTORE_BASE64 解码结果为空，请检查 Secret 内容。')
+              keystore.write_bytes(decoded)
               keystore.chmod(0o600)
               def escape(value):
                   return value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('=', '\\=').replace(':', '\\:').replace(' ', '\\ ')
