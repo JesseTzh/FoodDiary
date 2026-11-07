@@ -1,17 +1,23 @@
 FROM --platform=$BUILDPLATFORM ubuntu:24.04 AS frontend
 ARG FLUTTER_VERSION=3.47.7
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git libglu1-mesa python3 unzip xz-utils zip \
+    ca-certificates curl git libglu1-mesa python3 python3-venv unzip xz-utils zip \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git /opt/flutter
 ENV PATH="/opt/flutter/bin:${PATH}"
 RUN flutter precache --web
+COPY scripts/requirements-web.txt /app/scripts/requirements-web.txt
+RUN python3 -m venv /opt/web-tools \
+    && /opt/web-tools/bin/pip install --no-cache-dir -r /app/scripts/requirements-web.txt
+ENV PATH="/opt/web-tools/bin:${PATH}"
 WORKDIR /app/frontend
 COPY frontend/pubspec.yaml frontend/pubspec.lock ./
 RUN flutter pub get
 COPY frontend ./
 COPY scripts/build-pwa.py /app/scripts/build-pwa.py
-RUN flutter build web --release --no-web-resources-cdn && python3 /app/scripts/build-pwa.py
+COPY scripts/optimize-web.py /app/scripts/optimize-web.py
+RUN flutter build web --release --wasm --no-web-resources-cdn --dart-define=WEB_OPTIMIZED_ASSETS=true \
+    && python3 /app/scripts/optimize-web.py && python3 /app/scripts/build-pwa.py
 FROM golang:1.26-alpine AS backend
 ARG BUILD_COMMIT
 ARG BUILD_RELEASE_TAG

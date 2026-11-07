@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 /// Renders a normalized selection from the original image before fitting it.
 class CroppedPhoto extends StatefulWidget {
@@ -97,7 +98,8 @@ class _CropPainter extends CustomPainter {
       image,
       source,
       Offset.zero & size,
-      Paint()..filterQuality = FilterQuality.medium,
+      Paint()
+        ..filterQuality = kIsWeb ? FilterQuality.low : FilterQuality.medium,
     );
   }
 

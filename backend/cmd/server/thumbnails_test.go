@@ -28,7 +28,7 @@ func TestThumbnailDimensionsAndDiskReuse(t *testing.T) {
 	for _, test := range []struct {
 		variant       string
 		width, height int
-	}{{"thumbnail", 384, 288}, {"preview", 1024, 768}} {
+	}{{"thumbnail", 384, 288}, {"medium", 640, 480}, {"preview", 1024, 768}} {
 		path, mime, err := a.thumbnail("photo", test.variant, "image/png")
 		if err != nil {
 			t.Fatal(err)

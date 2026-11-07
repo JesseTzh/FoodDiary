@@ -1,0 +1,70 @@
+{
+  "before": {
+    "precacheEntries": 46,
+    "rawFilesBytes": 68229924,
+    "encodedFileBytesEstimate": 68229924,
+    "publishedFolderBytes": 68234636
+  },
+  "after": {
+    "precacheEntries": 37,
+    "rawFilesBytes": 47718109,
+    "encodedFileBytesEstimate": 24587743,
+    "publishedFolderBytes": 122939233
+  },
+  "note": "Calculated file-size sums, not measured network transfer or CacheStorage size. Root ./ duplicate and HTTP headers excluded. Baseline served identity; optimized assumes Brotli support. Extensionless SPA routing may change actual responses.",
+  "optimization": {
+    "images": [
+      {
+        "source": "assets/assets/images/app-logo.png",
+        "target": "assets/assets/images/app-logo.webp",
+        "before": 1294238,
+        "after": 893128
+      },
+      {
+        "source": "assets/assets/images/hero-cooking-together.png",
+        "target": "assets/assets/images/hero-cooking-together.webp",
+        "before": 1441232,
+        "after": 1124506
+      },
+      {
+        "source": "assets/assets/images/hero-playful-kitchen.png",
+        "target": "assets/assets/images/hero-playful-kitchen.webp",
+        "before": 1150275,
+        "after": 881678
+      },
+      {
+        "source": "assets/assets/images/hero-sharing-meal.png",
+        "target": "assets/assets/images/hero-sharing-meal.webp",
+        "before": 1209555,
+        "after": 945248
+      },
+      {
+        "source": "assets/assets/images/mascot.png",
+        "target": "assets/assets/images/mascot.webp",
+        "before": 90656,
+        "after": 64860
+      },
+      {
+        "source": "assets/assets/images/tomato-scrambled-eggs.png",
+        "target": "assets/assets/images/tomato-scrambled-eggs.webp",
+        "before": 2111246,
+        "after": 1609328
+      }
+    ],
+    "fonts": [
+      {
+        "source": "assets/assets/fonts/NotoSansSC.ttf",
+        "target": "assets/assets/fonts/NotoSansSC.ttf",
+        "encoding": "br",
+        "before": 17772300,
+        "after": 9356830
+      }
+    ]
+  },
+  "fixtureBytes": {
+    "preview": 185575,
+    "original": 266493,
+    "medium": 92383,
+    "thumbnail": 42239
+  }
+}

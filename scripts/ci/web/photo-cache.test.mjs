@@ -11,7 +11,7 @@ function worker({ cached, network, failStorage = false }) {
   const handlers = {};
   let fetches = 0, writes = 0;
   const cache = {
-    match: async () => cached,
+    match: async () => cached?.clone(),
     put: async () => { writes++; if (failStorage) throw new Error('quota'); },
     keys: async () => [],
   };
@@ -22,7 +22,7 @@ function worker({ cached, network, failStorage = false }) {
     fetch: async () => { fetches++; if (network instanceof Error) throw network; return network; },
   });
   return {
-    async request() {
+    async request({ waitForBackground = true } = {}) {
       let response;
       const pending = [];
       handlers.fetch({
@@ -31,7 +31,7 @@ function worker({ cached, network, failStorage = false }) {
         waitUntil: promise => pending.push(promise),
       });
       const result = await response;
-      await Promise.all(pending);
+      if (waitForBackground) await Promise.all(pending);
       return result;
     },
     get fetches() { return fetches; },
@@ -55,8 +55,17 @@ test('storage quota errors do not hide a downloaded image', async () => {
 test('expired images refresh and remain available offline', async () => {
   const cached = new Response('old', { headers: { date: new Date(0).toUTCString() } });
   const online = worker({ cached, network: new Response('new') });
-  assert.equal(await (await online.request()).text(), 'new');
+  assert.equal(await (await online.request()).text(), 'old');
   assert.equal(online.fetches, 1);
+  assert.equal(online.writes, 1);
   const offline = worker({ cached, network: new Error('offline') });
   assert.equal(await (await offline.request()).text(), 'old');
+});
+
+test('an expired cached image does not wait for a stalled network', async () => {
+  const cached = new Response('cached', { headers: { date: new Date(0).toUTCString() } });
+  const instance = worker({ cached, network: new Promise(() => {}) });
+  const response = await instance.request({ waitForBackground: false });
+  assert.equal(await response.text(), 'cached');
+  assert.equal(instance.fetches, 1);
 });

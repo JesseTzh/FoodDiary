@@ -99,9 +99,9 @@ Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在�
 
 ## PWA 行为
 
-构建后生成 `sw.js`，版本号取全部构建文件的内容哈希。应用壳、字体、图片及本地 CanvasKit 预缓存；安装失败不替换旧缓存。新版等待用户点击刷新后激活，激活时移除旧版本缓存。
+构建后生成 `sw.js`，版本号取构建资源的内容哈希。应用首帧后在空闲阶段注册 Service Worker；预缓存应用壳、字体、WebP 图片及实际支持的渲染器，不下载未使用的引擎变体和原始 PNG。`.br`/`.gz` 由 HTTP 协商，不单独预缓存。安装失败不替换旧缓存。新版等待用户点击刷新后激活，激活时移除旧版本缓存。
 
-API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON。应用在成功加载三组业务数据后，把快照保存到 SharedPreferences（Web 为浏览器本地存储）；断网时可读取快照。照片采用网络优先、离线缓存回退，最多缓存 100 张；退出登录清理照片缓存和当前服务器快照。未访问照片离线可能不可见。
+API 请求始终直接访问网络，不在 Service Worker 中缓存私密 JSON。应用在成功加载三组业务数据并绘制一帧后，把快照保存到 SharedPreferences（Web 为浏览器本地存储）；断网时可读取快照。照片采用缓存优先，过期缓存立即展示并后台刷新，最多缓存 100 张；退出登录清理照片缓存和当前服务器快照。未访问照片离线可能不可见。
 
 离线模式仅支持浏览日记和菜谱，不支持新增、编辑或收藏；应用启动、手动刷新及「重试」会重新连接。
 
@@ -132,11 +132,11 @@ Web 使用 HttpOnly、SameSite=Lax Cookie；HTTPS 下 Cookie 带 Secure 标记�
 
 `make check` 执行 Go vet 和 Flutter analyze；`make build` 生成后端与 PWA；`make apk` 生成 APK。修改 Web 后必须重新执行构建脚本，确保离线资源版本与页面一致。
 
-Web 构建必须运行 `make web` 或 `./scripts/build-web.sh`。脚本会在 Flutter 构建后生成 Service Worker。构建使用本地 CanvasKit 和中文字体，不要添加 `--wasm`。
+Web 构建运行 `make web` 或 `./scripts/build-web.sh`，首次需安装 `scripts/requirements-web.txt` 中的 Python 依赖。脚本统一添加 `--wasm`、保留 CanvasKit 回退、生成 Web 专用无损 WebP 与 HTTP Brotli/gzip 资源，再生成 Service Worker。不要手动强制 skwasm 的浏览器允许列表；当前 SDK 对 Safari 保留兼容回退。中文字体保持原始 TTF，避免在 Skia 内部进行 WOFF2 解压。
 
 Web、`make apk`、`make appbundle` 与 CI 通过 `scripts/build-flutter.sh` 统一注入显示版本号，格式为 `Ver:yymmdd-hhmm-gitsha`，日期和时间使用打包时的北京时间（Asia/Shanghai）。直接 `flutter run` 未注入版本时显示 `Ver:dev`。
 
-生产反向代理需放行 `.wasm`、字体与 `/media/`，保留服务器返回的 WASM MIME。`index.html`、`flutter_bootstrap.js` 和 `sw.js` 不应被代理长时间缓存。数据库和照片统一备份 `FOODDIARY_DATA_DIR`，不要把该目录放进镜像。
+生产反向代理需放行 `.wasm`、`.mjs`、字体与 `/media/`，保留 MIME、Content-Encoding、Vary 和跨源隔离响应头。Go 服务自动协商预压缩资源，并对页面发送 `Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Embedder-Policy: require-corp`，支持的浏览器可启用渲染工作线程。直接用其他静态服务器时需配置等价的头部与压缩协商。`index.html`、`flutter_bootstrap.js` 和 `sw.js` 不应被代理长时间缓存。数据库和照片统一备份 `FOODDIARY_DATA_DIR`，不要把该目录放进镜像。
 
 ### 本地验证 CI Web 截图
 

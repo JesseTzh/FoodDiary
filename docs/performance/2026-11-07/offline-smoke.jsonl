@@ -1,0 +1,2 @@
+{"safariSelectionOnly":false,"online":{"isolated":true,"engines":["http://127.0.0.1:18764/canvaskit/skwasm.wasm","http://127.0.0.1:18764/canvaskit/skwasm.js"],"cached":["fooddiary-shell-3a64398971cd28b8"]},"offlineReload":"passed","errors":[]}
+{"safariSelectionOnly":true,"online":{"isolated":true,"engines":["http://127.0.0.1:18764/canvaskit/canvaskit.wasm","http://127.0.0.1:18764/canvaskit/canvaskit.js"],"cached":["fooddiary-shell-3a64398971cd28b8"]},"offlineReload":"passed","errors":[]}

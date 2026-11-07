@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Stable cross-platform hook for UI automation.
@@ -18,9 +19,19 @@ const muted = Color(0xFFA2978C);
 const orange = Color(0xFFFF942F);
 const gold = Color(0xFFFFBE4C);
 const line = Color(0xFFF0E8DD);
-ThemeData kitchenTheme() => ThemeData(
+ThemeData kitchenTheme({bool web = kIsWeb}) => ThemeData(
   useMaterial3: true,
   fontFamily: 'NotoSansSC',
+  // Browser history owns the edge-back gesture. Avoid a second Cupertino
+  // gesture/500ms return animation inside the Web canvas, including on iOS.
+  pageTransitionsTheme: web
+      ? PageTransitionsTheme(
+          builders: {
+            for (final platform in TargetPlatform.values)
+              platform: const WebPageTransitionsBuilder(),
+          },
+        )
+      : const PageTransitionsTheme(),
   scaffoldBackgroundColor: cream,
   colorScheme: ColorScheme.fromSeed(
     seedColor: orange,
@@ -65,6 +76,25 @@ ThemeData kitchenTheme() => ThemeData(
   ),
 );
 
+class WebPageTransitionsBuilder extends PageTransitionsBuilder {
+  const WebPageTransitionsBuilder();
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 120);
+
+  @override
+  Duration get reverseTransitionDuration => Duration.zero;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) => FadeTransition(opacity: animation, child: child);
+}
+
 class CozyCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
@@ -79,14 +109,16 @@ class CozyCard extends StatelessWidget {
     decoration: BoxDecoration(
       color: paper,
       borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: Colors.white),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x08633C14),
-          blurRadius: 24,
-          offset: Offset(0, 8),
-        ),
-      ],
+      border: Border.all(color: kIsWeb ? line : Colors.white),
+      boxShadow: kIsWeb
+          ? null
+          : const [
+              BoxShadow(
+                color: Color(0x08633C14),
+                blurRadius: 24,
+                offset: Offset(0, 8),
+              ),
+            ],
     ),
     child: Material(color: Colors.transparent, child: child),
   );

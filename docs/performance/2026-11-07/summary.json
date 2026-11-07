@@ -1,0 +1,83 @@
+{
+  "gpu": {
+    "Startup ready": {
+      "before": 1431.6000000238419,
+      "after": 762.669999986887,
+      "reductionPercent": 46.726040795320934
+    },
+    "Scroll rAF p50": {
+      "before": 16.699999999999818,
+      "after": 16.664999999999964,
+      "reductionPercent": 0.2095808383224873
+    },
+    "Scroll rAF p95": {
+      "before": 33.30000000000018,
+      "after": 16.670000000000073,
+      "reductionPercent": 49.93993993993999
+    },
+    "History back ready": {
+      "before": 519.9000000059605,
+      "after": 24.11499997973442,
+      "reductionPercent": 95.36160800548991
+    },
+    "Scroll long tasks total": {
+      "before": 57,
+      "after": 0,
+      "reductionPercent": 100.0
+    }
+  },
+  "compat": {
+    "Startup ready": {
+      "before": 1463,
+      "after": 1523.119999974966,
+      "reductionPercent": -4.109364318179498
+    },
+    "Scroll rAF p50": {
+      "before": 16.699999999999818,
+      "after": 16.664999999999964,
+      "reductionPercent": 0.2095808383224873
+    },
+    "Scroll rAF p95": {
+      "before": 33.40000000000009,
+      "after": 33.33000000000038,
+      "reductionPercent": 0.2095808383224762
+    },
+    "History back ready": {
+      "before": 533.8000000119209,
+      "after": 35.145000010728836,
+      "reductionPercent": 93.41607343388087
+    },
+    "Scroll long tasks total": {
+      "before": 159,
+      "after": 52,
+      "reductionPercent": 67.29559748427674
+    }
+  },
+  "software": {
+    "Startup ready": {
+      "before": 586.2999999821186,
+      "after": 420.3600000143051,
+      "reductionPercent": 28.30291659097296
+    },
+    "Scroll rAF p50": {
+      "before": 216.60000000000218,
+      "after": 149.98999999999978,
+      "reductionPercent": 30.752539242844744
+    },
+    "Scroll rAF p95": {
+      "before": 250,
+      "after": 183.32499999999982,
+      "reductionPercent": 26.670000000000073
+    },
+    "History back ready": {
+      "before": 701.1000000238419,
+      "after": 134.79499998688698,
+      "reductionPercent": 80.77378405615417
+    },
+    "Scroll long tasks total": {
+      "before": 18487,
+      "after": 13030,
+      "reductionPercent": 29.518039703575482
+    }
+  }
+}

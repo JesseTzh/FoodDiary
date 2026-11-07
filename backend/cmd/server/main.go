@@ -939,7 +939,7 @@ func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 	}
 	path := filepath.Join(a.data, "media", id)
 	variant := chi.URLParam(r, "variant")
-	if variant == "thumbnail" || variant == "preview" {
+	if variant == "thumbnail" || variant == "medium" || variant == "preview" {
 		if resized, resizedMime, err := a.thumbnail(id, variant, mime); err == nil {
 			path, mime = resized, resizedMime
 		}
@@ -1023,6 +1023,7 @@ func loadMigrations(db *sql.DB, dir string) error {
 func routes(a *App) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.Logger, middleware.Recoverer, a.protectBrowserWrites)
+	r.Use(middleware.Compress(5, "text/html", "text/css", "text/javascript", "application/javascript", "application/json", "application/wasm", "image/svg+xml"))
 	if len(a.corsOrigins) > 0 {
 		r.Use(a.cors)
 	}
@@ -1077,6 +1078,9 @@ func routes(a *App) http.Handler {
 		frontend = "frontend/build/web"
 	}
 	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Skwasm can move raster work to a worker when the document is isolated.
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		if strings.HasPrefix(req.URL.Path, "/api/") || strings.HasPrefix(req.URL.Path, "/media/") {
 			http.NotFound(w, req)
 			return
@@ -1092,7 +1096,7 @@ func routes(a *App) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
-		http.ServeFile(w, req, p)
+		serveWebFile(w, req, p)
 	}))
 	return r
 }

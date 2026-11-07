@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'data/api.dart';
 import 'data/models.dart';
 import 'ui/theme.dart';
+import 'ui/web_assets.dart';
 import 'ui/app_update.dart';
 import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
@@ -164,7 +165,6 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         api.request('GET', '/recipes'),
         api.request('GET', '/profile'),
       ]);
-      await api.prefs.setString('snapshot:${api.base}', jsonEncode(result));
       if (mounted) {
         setState(() {
           entries = (result[0]['items'] as List).map((e) => Diary(e)).toList();
@@ -173,6 +173,11 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
           authenticated = true;
           offline = false;
           loading = false;
+        });
+        // Persist after the loaded UI has had a frame, and do not turn a
+        // successful request into an offline/error state if storage is full.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_cacheSnapshot(result));
         });
       }
     } catch (e) {
@@ -204,6 +209,14 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
           loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _cacheSnapshot(List<dynamic> result) async {
+    try {
+      await api.prefs.setString('snapshot:${api.base}', jsonEncode(result));
+    } catch (error) {
+      debugPrint('Snapshot storage unavailable: $error');
     }
   }
 
@@ -310,7 +323,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(40),
                       child: Image.asset(
-                        'assets/images/app-logo.png',
+                        webAssetName('assets/images/app-logo.png'),
                         width: 165,
                       ),
                     ),
@@ -467,7 +480,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         ClipRRect(
           borderRadius: BorderRadius.circular(24),
           child: Image.asset(
-            dailyHeroAsset(today),
+            webAssetName(dailyHeroAsset(today)),
             width: double.infinity,
             fit: BoxFit.fitWidth,
           ),
@@ -966,7 +979,7 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         children: [
           ClipOval(
             child: Image.asset(
-              'assets/images/mascot.png',
+              webAssetName('assets/images/mascot.png'),
               width: 76,
               height: 76,
               fit: BoxFit.cover,

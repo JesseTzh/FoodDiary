@@ -10,6 +10,17 @@ import 'package:fooddiary/ui/dish_photo.dart';
 import 'package:fooddiary/ui/theme.dart';
 
 void main() {
+  test('photo tiers fit physical pixels without jumping from 384 to 1024', () {
+    expect(photoVariantFor(112 * 3), 'thumbnail');
+    expect(photoVariantFor(160 * 3), 'medium');
+    expect(photoVariantFor(384), 'thumbnail');
+    expect(photoVariantFor(640), 'medium');
+    expect(photoVariantFor(440 * 3), 'preview');
+    expect(
+      photoVariantFor(160 * 3, crop: const Rect.fromLTWH(.2, .2, .5, .5)),
+      'preview',
+    );
+  });
   testWidgets('scrolling a cropped photo away and back reuses decoded image', (
     tester,
   ) async {
@@ -91,6 +102,10 @@ void main() {
       expect(
         (dishImageProvider(api, path, variant: 'preview') as NetworkImage).url,
         endsWith('/preview'),
+      );
+      expect(
+        (dishImageProvider(api, path, variant: 'medium') as NetworkImage).url,
+        endsWith('/medium'),
       );
       expect(
         (dishImageProvider(api, path) as NetworkImage).url,

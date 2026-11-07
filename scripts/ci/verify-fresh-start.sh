@@ -90,6 +90,7 @@ CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --data "{\"password\":\"$PASSWORD\"}")"
 [[ "$CODE" == "409" ]]
 verify_web home
+CI_BASE_URL="$BASE_URL" CI_PASSWORD="$PASSWORD" node "$SCRIPT_DIR/web/offline.mjs"
 
 # Create one entry against the empty data volume, with the session cookie.
 TITLE="CI fresh-start $(date -u +%Y%m%dT%H%M%SZ)"

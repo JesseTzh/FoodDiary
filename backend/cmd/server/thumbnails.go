@@ -17,6 +17,9 @@ import (
 // normalized crop coordinates work for both covers and thumbnails.
 func (a *App) thumbnail(id, variant, mime string) (string, string, error) {
 	side := 384
+	if variant == "medium" {
+		side = 640
+	}
 	if variant == "preview" {
 		side = 1024
 	}
@@ -84,7 +87,7 @@ func (a *App) thumbnail(id, variant, mime string) (string, string, error) {
 }
 
 func (a *App) removeMediaFiles(id string) {
-	for _, suffix := range []string{"", ".thumbnail-v1", ".preview-v1"} {
+	for _, suffix := range []string{"", ".thumbnail-v1", ".medium-v1", ".preview-v1"} {
 		_ = os.Remove(filepath.Join(a.data, "media", id+suffix))
 	}
 }

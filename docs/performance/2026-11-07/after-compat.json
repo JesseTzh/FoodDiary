@@ -1,0 +1,386 @@
+{
+  "config": {
+    "build": "/private/tmp/fooddiary-web-after-final",
+    "fixtures": "/private/tmp/fooddiary-perf-fixtures",
+    "output": "docs/performance/2026-11-07/after-compat.json",
+    "runs": "3",
+    "cpu": "4",
+    "channel": "chrome",
+    "ios": true,
+    "delivery": "optimized",
+    "viewport": "390x844@3",
+    "entries": 300,
+    "note": "rAF intervals measure main-thread responsiveness, not actual rendered GPU FPS; iOS UA emulation is not iPhone WebKit."
+  },
+  "samples": [
+    {
+      "run": 1,
+      "browser": "156.0.8078.81",
+      "cpuThrottle": 4,
+      "softwareRequested": false,
+      "iosUserAgentOnly": true,
+      "startup": {
+        "readyMs": 1523.119999974966,
+        "isolated": true,
+        "resources": [
+          {
+            "name": "/flutter_bootstrap.js",
+            "bytes": 5374,
+            "durationMs": 6.594999998807907
+          },
+          {
+            "name": "/canvaskit/canvaskit.wasm",
+            "bytes": 2598549,
+            "durationMs": 37.16999998688698
+          },
+          {
+            "name": "/canvaskit/canvaskit.js",
+            "bytes": 26492,
+            "durationMs": 3.8499999940395355
+          },
+          {
+            "name": "/main.dart.js",
+            "bytes": 776643,
+            "durationMs": 18.69999998807907
+          },
+          {
+            "name": "/assets/FontManifest.json",
+            "bytes": 138,
+            "durationMs": 2.544999986886978
+          },
+          {
+            "name": "/assets/fonts/MaterialIcons-Regular.otf",
+            "bytes": 6958,
+            "durationMs": 1.6899999976158142
+          },
+          {
+            "name": "/assets/assets/fonts/NotoSansSC.ttf",
+            "bytes": 9356830,
+            "durationMs": 82.58500000834465
+          },
+          {
+            "name": "/assets/fonts/fallback/Roboto-Regular.ttf",
+            "bytes": 84363,
+            "durationMs": 3.280000001192093
+          },
+          {
+            "name": "/icons/Icon-192.png",
+            "bytes": 67363,
+            "durationMs": 1.875
+          },
+          {
+            "name": "/assets/AssetManifest.bin.json",
+            "bytes": 358,
+            "durationMs": 3.7650000154972076
+          },
+          {
+            "name": "/api/v1/auth/status",
+            "bytes": 62,
+            "durationMs": 0.7150000035762787
+          },
+          {
+            "name": "/api/v1/entries",
+            "bytes": 3617,
+            "durationMs": 1.4950000047683716
+          },
+          {
+            "name": "/api/v1/recipes",
+            "bytes": 4710,
+            "durationMs": 1.5099999904632568
+          },
+          {
+            "name": "/api/v1/profile",
+            "bytes": 62,
+            "durationMs": 1.5600000023841858
+          },
+          {
+            "name": "/assets/assets/images/app-logo.webp",
+            "bytes": 893128,
+            "durationMs": 2.2649999856948853
+          },
+          {
+            "name": "/assets/assets/images/hero-cooking-together.webp",
+            "bytes": 1124506,
+            "durationMs": 2.6949999928474426
+          },
+          {
+            "name": "/media/assets/photo-0/thumbnail",
+            "bytes": 42239,
+            "durationMs": 1.375
+          },
+          {
+            "name": "/media/assets/photo-1/thumbnail",
+            "bytes": 42239,
+            "durationMs": 0.5899999737739563
+          }
+        ]
+      },
+      "renderer": "canvaskit",
+      "scroll": {
+        "callbackCount": 137,
+        "p50Ms": 16.664999999999964,
+        "p95Ms": 33.335000000000036,
+        "maxMs": 49.99499999999989,
+        "gapsOver33ms": 1,
+        "longTaskCount": 1,
+        "longTaskTotalMs": 52,
+        "elapsedMs": 2555
+      },
+      "photoRequests": {
+        "thumbnail": 2,
+        "medium": 18
+      },
+      "historyBackMs": 35.145000010728836,
+      "backRequests": [],
+      "fullPhotoRequests": [],
+      "zoomOriginalLoaded": true,
+      "errors": []
+    },
+    {
+      "run": 2,
+      "browser": "156.0.8078.81",
+      "cpuThrottle": 4,
+      "softwareRequested": false,
+      "iosUserAgentOnly": true,
+      "startup": {
+        "readyMs": 1554.4850000143051,
+        "isolated": true,
+        "resources": [
+          {
+            "name": "/flutter_bootstrap.js",
+            "bytes": 5374,
+            "durationMs": 4.889999985694885
+          },
+          {
+            "name": "/canvaskit/canvaskit.wasm",
+            "bytes": 2598549,
+            "durationMs": 37.28499999642372
+          },
+          {
+            "name": "/canvaskit/canvaskit.js",
+            "bytes": 26492,
+            "durationMs": 1.5049999952316284
+          },
+          {
+            "name": "/main.dart.js",
+            "bytes": 776643,
+            "durationMs": 17.390000015497208
+          },
+          {
+            "name": "/assets/FontManifest.json",
+            "bytes": 138,
+            "durationMs": 1.0150000154972076
+          },
+          {
+            "name": "/assets/fonts/MaterialIcons-Regular.otf",
+            "bytes": 6958,
+            "durationMs": 2.2300000190734863
+          },
+          {
+            "name": "/assets/assets/fonts/NotoSansSC.ttf",
+            "bytes": 9356830,
+            "durationMs": 85.11500000953674
+          },
+          {
+            "name": "/assets/fonts/fallback/Roboto-Regular.ttf",
+            "bytes": 84363,
+            "durationMs": 1.8400000035762787
+          },
+          {
+            "name": "/icons/Icon-192.png",
+            "bytes": 67363,
+            "durationMs": 1.074999988079071
+          },
+          {
+            "name": "/assets/AssetManifest.bin.json",
+            "bytes": 358,
+            "durationMs": 1.800000011920929
+          },
+          {
+            "name": "/api/v1/auth/status",
+            "bytes": 62,
+            "durationMs": 1.655000001192093
+          },
+          {
+            "name": "/api/v1/entries",
+            "bytes": 3617,
+            "durationMs": 1.0449999868869781
+          },
+          {
+            "name": "/api/v1/recipes",
+            "bytes": 4710,
+            "durationMs": 1.0900000035762787
+          },
+          {
+            "name": "/api/v1/profile",
+            "bytes": 62,
+            "durationMs": 1.030000001192093
+          },
+          {
+            "name": "/assets/assets/images/app-logo.webp",
+            "bytes": 893128,
+            "durationMs": 1.6899999976158142
+          },
+          {
+            "name": "/assets/assets/images/hero-cooking-together.webp",
+            "bytes": 1124506,
+            "durationMs": 2.219999998807907
+          },
+          {
+            "name": "/media/assets/photo-0/thumbnail",
+            "bytes": 42239,
+            "durationMs": 0.6299999952316284
+          },
+          {
+            "name": "/media/assets/photo-1/thumbnail",
+            "bytes": 42239,
+            "durationMs": 1.104999989271164
+          }
+        ]
+      },
+      "renderer": "canvaskit",
+      "scroll": {
+        "callbackCount": 143,
+        "p50Ms": 16.664999999999964,
+        "p95Ms": 33.32999999999993,
+        "maxMs": 50,
+        "gapsOver33ms": 1,
+        "longTaskCount": 1,
+        "longTaskTotalMs": 52,
+        "elapsedMs": 2574
+      },
+      "photoRequests": {
+        "thumbnail": 2,
+        "medium": 18
+      },
+      "historyBackMs": 27.730000019073486,
+      "backRequests": [],
+      "fullPhotoRequests": [],
+      "zoomOriginalLoaded": true,
+      "errors": []
+    },
+    {
+      "run": 3,
+      "browser": "156.0.8078.81",
+      "cpuThrottle": 4,
+      "softwareRequested": false,
+      "iosUserAgentOnly": true,
+      "startup": {
+        "readyMs": 1518.375,
+        "isolated": true,
+        "resources": [
+          {
+            "name": "/flutter_bootstrap.js",
+            "bytes": 5374,
+            "durationMs": 4.075000017881393
+          },
+          {
+            "name": "/canvaskit/canvaskit.wasm",
+            "bytes": 2598549,
+            "durationMs": 43.64999997615814
+          },
+          {
+            "name": "/canvaskit/canvaskit.js",
+            "bytes": 26492,
+            "durationMs": 1.5999999940395355
+          },
+          {
+            "name": "/main.dart.js",
+            "bytes": 776643,
+            "durationMs": 18.13500002026558
+          },
+          {
+            "name": "/assets/FontManifest.json",
+            "bytes": 138,
+            "durationMs": 1.1899999976158142
+          },
+          {
+            "name": "/assets/fonts/MaterialIcons-Regular.otf",
+            "bytes": 6958,
+            "durationMs": 1.0600000023841858
+          },
+          {
+            "name": "/assets/assets/fonts/NotoSansSC.ttf",
+            "bytes": 9356830,
+            "durationMs": 82.12000000476837
+          },
+          {
+            "name": "/assets/fonts/fallback/Roboto-Regular.ttf",
+            "bytes": 84363,
+            "durationMs": 3.1399999856948853
+          },
+          {
+            "name": "/icons/Icon-192.png",
+            "bytes": 67363,
+            "durationMs": 2.4850000143051147
+          },
+          {
+            "name": "/assets/AssetManifest.bin.json",
+            "bytes": 358,
+            "durationMs": 1.155000001192093
+          },
+          {
+            "name": "/api/v1/auth/status",
+            "bytes": 62,
+            "durationMs": 0.7349999845027924
+          },
+          {
+            "name": "/api/v1/entries",
+            "bytes": 3617,
+            "durationMs": 1.2150000035762787
+          },
+          {
+            "name": "/api/v1/recipes",
+            "bytes": 4710,
+            "durationMs": 1.574999988079071
+          },
+          {
+            "name": "/api/v1/profile",
+            "bytes": 62,
+            "durationMs": 1.6349999904632568
+          },
+          {
+            "name": "/assets/assets/images/app-logo.webp",
+            "bytes": 893128,
+            "durationMs": 1.8299999833106995
+          },
+          {
+            "name": "/assets/assets/images/hero-cooking-together.webp",
+            "bytes": 1124506,
+            "durationMs": 2.300000011920929
+          },
+          {
+            "name": "/media/assets/photo-0/thumbnail",
+            "bytes": 42239,
+            "durationMs": 0.6899999976158142
+          },
+          {
+            "name": "/media/assets/photo-1/thumbnail",
+            "bytes": 42239,
+            "durationMs": 0.5799999833106995
+          }
+        ]
+      },
+      "renderer": "canvaskit",
+      "scroll": {
+        "callbackCount": 145,
+        "p50Ms": 16.664999999999964,
+        "p95Ms": 33.33000000000038,
+        "maxMs": 50,
+        "gapsOver33ms": 1,
+        "longTaskCount": 1,
+        "longTaskTotalMs": 50,
+        "elapsedMs": 2596
+      },
+      "photoRequests": {
+        "thumbnail": 2,
+        "medium": 18
+      },
+      "historyBackMs": 40.38499999046326,
+      "backRequests": [],
+      "fullPhotoRequests": [],
+      "zoomOriginalLoaded": true,
+      "errors": []
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../data/api.dart';
 import '../data/models.dart';
 import 'theme.dart';
+import 'web_assets.dart';
 import 'image_upload.dart';
 import 'cropped_photo.dart';
 import 'dish_photo.dart';
@@ -166,7 +167,10 @@ class _WelcomePageState extends State<WelcomePage> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(50),
-                  child: Image.asset('assets/images/app-logo.png', width: 180),
+                  child: Image.asset(
+                    webAssetName('assets/images/app-logo.png'),
+                    width: 180,
+                  ),
                 ),
                 const SizedBox(height: 26),
                 const Text(

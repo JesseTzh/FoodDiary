@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api.dart';
@@ -200,18 +201,50 @@ class _FullPhotosState extends State<_FullPhotos> {
         controller: controller,
         itemCount: widget.paths.length,
         onPageChanged: (value) => setState(() => index = value),
-        itemBuilder: (context, i) => InteractiveViewer(
-          minScale: 1,
-          maxScale: 4,
-          child: Center(
-            child: Image(
-              image: dishImageProvider(widget.api, widget.paths[i]),
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) =>
-                  const Text('照片暂时无法加载', style: TextStyle(color: Colors.white)),
-            ),
-          ),
+        itemBuilder: (context, i) => _ZoomablePhoto(
+          key: ValueKey(widget.paths[i]),
+          api: widget.api,
+          path: widget.paths[i],
         ),
+      ),
+    ),
+  );
+}
+
+// Web starts with a bounded preview. Original pixels are fetched only when
+// the user zooms, rather than decoding phone-camera originals during a pop.
+class _ZoomablePhoto extends StatefulWidget {
+  final Api api;
+  final String path;
+  const _ZoomablePhoto({super.key, required this.api, required this.path});
+
+  @override
+  State<_ZoomablePhoto> createState() => _ZoomablePhotoState();
+}
+
+class _ZoomablePhotoState extends State<_ZoomablePhoto> {
+  bool original = !kIsWeb;
+
+  @override
+  Widget build(BuildContext context) => InteractiveViewer(
+    minScale: 1,
+    maxScale: 4,
+    onInteractionUpdate: (details) {
+      if (!original && details.scale > 1.1) {
+        setState(() => original = true);
+      }
+    },
+    child: Center(
+      child: Image(
+        image: dishImageProvider(
+          widget.api,
+          widget.path,
+          variant: original ? null : 'preview',
+        ),
+        gaplessPlayback: true,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) =>
+            const Text('照片暂时无法加载', style: TextStyle(color: Colors.white)),
       ),
     ),
   );

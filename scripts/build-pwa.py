@@ -2,13 +2,30 @@
 from pathlib import Path
 import hashlib
 import json
-root = Path(__file__).resolve().parent.parent / 'frontend/build/web'
-paths = sorted(p for p in root.rglob('*') if p.is_file() and p.name not in ('sw.js', 'flutter_service_worker.js') and not p.name.endswith('.map'))
+import sys
+root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent / 'frontend/build/web'
+paths = sorted(p for p in root.rglob('*') if p.is_file() and p.name not in ('sw.js', 'flutter_service_worker.js') and p.suffix not in ('.map', '.br', '.gz'))
 digest = hashlib.sha256()
 for p in paths:
     digest.update(p.relative_to(root).as_posix().encode())
     digest.update(p.read_bytes())
-assets = ['./'] + ['./' + p.relative_to(root).as_posix() for p in paths]
+# Ship all compatibility files, but do not download unused engine variants or
+# original PNG files while installing the optimized offline shell. Compressed
+# HTTP sidecars are negotiated by the server, not cached under their own URLs.
+replaced = set()
+optimization = root / 'web-optimization.json'
+if optimization.exists():
+    for rows in json.loads(optimization.read_text()).values():
+        replaced.update(row['source'] for row in rows if row['source'] != row['target'])
+engines = {
+    'canvaskit/canvaskit.js', 'canvaskit/canvaskit.wasm',
+    'canvaskit/chromium/canvaskit.js', 'canvaskit/chromium/canvaskit.wasm',
+    'canvaskit/skwasm.js', 'canvaskit/skwasm.wasm',
+}
+shell_paths = [p for p in paths if p.relative_to(root).as_posix() not in replaced
+               and (not p.relative_to(root).as_posix().startswith('canvaskit/')
+                    or p.relative_to(root).as_posix() in engines)]
+assets = ['./'] + ['./' + p.relative_to(root).as_posix() for p in shell_paths]
 worker = '''
 const VERSION = __VERSION__;
 const SHELL = 'fooddiary-shell-' + VERSION;
@@ -35,8 +52,7 @@ self.addEventListener('fetch', event => {
       const cached = cache && await cache.match(req);
       // Immutable media can be reused without a network trip while fresh.
       const storedAt = cached && Date.parse(cached.headers.get('date') || '');
-      if (cached && Date.now() - storedAt < 86400000) return cached;
-      try {
+      async function download() {
         const response = await fetch(req);
         if (response.ok && cache) {
           const copy = response.clone();
@@ -50,8 +66,19 @@ self.addEventListener('fetch', event => {
           })().catch(() => {}));
         }
         return response;
+      }
+      if (cached) {
+        // Media URLs are immutable. Render stale pixels immediately while
+        // refreshing in the background, including on slow/offline networks.
+        if (!(Date.now() - storedAt < 86400000)) {
+          event.waitUntil(download().catch(() => {}));
+        }
+        return cached;
+      }
+      try {
+        return await download();
       } catch (_) {
-        return cached || Response.error();
+        return Response.error();
       }
     })());
     return;
@@ -60,9 +87,14 @@ self.addEventListener('fetch', event => {
     const cached = await cache.match(req, {ignoreSearch: true});
     if (cached) return cached;
     if (req.mode === 'navigate') return cache.match('./index.html');
-    return fetch(req);
+    const response = await fetch(req);
+    if (response.ok) {
+      event.waitUntil(cache.put(req, response.clone()).catch(() => {}));
+    }
+    return response;
   }));
 });
 '''
 (root / 'sw.js').write_text(worker.replace('__VERSION__', json.dumps(digest.hexdigest()[:16])).replace('__ASSETS__', json.dumps(assets)), encoding='utf-8')
 print(f'PWA: {len(assets)} resources, cache {digest.hexdigest()[:16]}')
+print(f'PWA shell: {sum(p.stat().st_size for p in shell_paths):,} bytes')

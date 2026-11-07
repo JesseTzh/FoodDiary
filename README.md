@@ -47,13 +47,14 @@ make apk API_BASE_URL=https://your-server.example
 make appbundle API_BASE_URL=https://your-server.example
 ```
 
-发布 Web 时使用 `make build` 或 `make web`。不要直接使用 `flutter build web`，因为该命令不会生成项目使用的 PWA Service Worker。
+发布 Web 时先安装 `scripts/requirements-web.txt` 中的 Python 构建依赖，再使用 `make build` 或 `make web`。脚本统一生成 Wasm 与 CanvasKit 回退、Web 专用无损图片、Brotli/gzip 预压缩资源和 PWA Service Worker。Docker 构建已包含这些依赖；直接使用 `flutter build web` 不会执行完整优化流程。
 
 ## 文档
 
 - [开发说明](docs/DEVELOPMENT.md)：代码结构、接口、认证、PWA、Android 和本地验证。
 - [发布说明](docs/RELEASE.md)：Docker、CI、截图图册和 Android Release。
 - [前端说明](frontend/README.md)：Flutter 前端开发和模拟数据。
+- [Web 性能优化报告](docs/WEB_PERFORMANCE.md)：改动、可复现基准、前后数据和 iPhone 验证范围。
 
 ## 数据和部署
 

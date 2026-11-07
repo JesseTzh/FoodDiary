@@ -18,7 +18,7 @@ docker run --rm -p 8080:8080 -v fooddiary-data:/data fooddiary:local
 
 Go 服务同时提供 API、照片和 Web 文件。生产环境建议使用同源 HTTPS。PWA 安装和相机访问需要 HTTPS 或 localhost。请把 `FOODDIARY_DATA_DIR` 指向持久化目录，并备份数据库、照片和 `jwt.key`。不要把数据目录放入镜像。
 
-反向代理需允许 `.wasm`、字体和 `/media/` 请求，并保留 WASM MIME 类型。不要长时间缓存 `index.html`、`flutter_bootstrap.js` 或 `sw.js`。
+反向代理需允许 `.wasm`、`.mjs`、字体和 `/media/` 请求，并保留 MIME、Content-Encoding、Vary、COOP/COEP 响应头。Go 服务优先提供构建阶段生成的 Brotli/gzip 文件；直接静态托管需配置等价的预压缩协商和 `Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Embedder-Policy: require-corp`。不要长时间缓存 `index.html`、`flutter_bootstrap.js` 或 `sw.js`。部署后应在 PWA 的新版提示中点击刷新，确认新资源已经激活。
 
 ## CI 工作流
 

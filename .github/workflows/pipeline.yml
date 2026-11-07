@@ -313,7 +313,11 @@ jobs:
           channel: stable
           cache: true
       - name: Build isolated mock frontend
-        run: bash scripts/build-web.sh --dart-define=MOCK_API=true
+        # Web release assets use lossless WebP and HTTP Brotli compression.
+        # Production Docker builds install the same requirements.
+        run: |
+          python3 -m pip install -r scripts/requirements-web.txt
+          bash scripts/build-web.sh --dart-define=MOCK_API=true
       - uses: actions/setup-node@v7
         with:
           node-version: '22'

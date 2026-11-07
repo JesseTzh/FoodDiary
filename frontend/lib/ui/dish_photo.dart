@@ -5,6 +5,17 @@ import 'package:flutter/material.dart';
 
 import '../data/api.dart';
 import 'cropped_photo.dart';
+import 'web_assets.dart';
+
+String photoVariantFor(double physicalPixels, {Rect? crop}) {
+  final fraction = crop?.shortestSide.clamp(.01, 1.0) ?? 1.0;
+  final pixels = physicalPixels / fraction;
+  return pixels <= 384
+      ? 'thumbnail'
+      : pixels <= 640
+      ? 'medium'
+      : 'preview';
+}
 
 class DishPhoto extends StatelessWidget {
   final Api api;
@@ -39,7 +50,7 @@ class DishPhoto extends StatelessWidget {
                       ? logicalWidth
                       : logicalHeight) *
                   MediaQuery.devicePixelRatioOf(context);
-              return _photo(pixels <= 384 ? 'thumbnail' : 'preview');
+              return _photo(photoVariantFor(pixels, crop: crop));
             },
           );
     return ClipRRect(
@@ -127,7 +138,7 @@ class _MemoryImages {
 ImageProvider dishImageProvider(Api api, String path, {String? variant}) {
   final ImageProvider provider;
   if (api.mock && path.startsWith('asset:')) {
-    provider = AssetImage(path.substring(6));
+    provider = AssetImage(webAssetName(path.substring(6)));
   } else if (api.mock && path.startsWith('data:')) {
     provider = (_memoryImages[api] ??= _MemoryImages()).get(path);
   } else {

@@ -1,6 +1,6 @@
 # 做饭日记 Flutter 客户端
 
-共享 Flutter 界面支持 Web CanvasKit PWA 与 Android，详细操作见 [项目说明](../README.md)。
+共享 Flutter 界面支持 Web/PWA 与 Android 原生 App。Web 发布包按 Flutter SDK 的浏览器兼容策略选择 skwasm 或 CanvasKit，详细操作见 [项目说明](../README.md)。
 
 ```sh
 flutter pub get
@@ -8,7 +8,7 @@ flutter run -d chrome --web-port=5173 --dart-define=API_BASE_URL=http://localhos
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 ```
 
-Web 发布请从仓库根目录运行 `make web`，生成包含本地 CanvasKit 与 PWA Service Worker 的完整资源。Android 发布使用 `make apk`，首次启动时输入后端 HTTPS 地址，连接成功后保存在本机。可用 `make apk API_BASE_URL=https://your-server.example` 预填地址，也可通过登录页「修改后端地址」或「我的 → 后端地址」重新配置。切换服务器后需重新登录。Web 无需此配置。
+Web 发布请先安装 `scripts/requirements-web.txt` 中的 Python 依赖，再从仓库根目录运行 `make web`，生成包含本地渲染器、预压缩资源与 PWA Service Worker 的完整资源。Web 页面前进为 120ms 淡入，返回即时完成；iOS Web 的边缘返回交给浏览器处理，安卓原生仍采用默认原生转场。Android 发布使用 `make apk`，首次启动时输入后端 HTTPS 地址，连接成功后保存在本机。可用 `make apk API_BASE_URL=https://your-server.example` 预填地址，也可通过登录页「修改后端地址」或「我的 → 后端地址」重新配置。切换服务器后需重新登录。Web 无需此配置。
 
 ## 无后端本地调试
 
