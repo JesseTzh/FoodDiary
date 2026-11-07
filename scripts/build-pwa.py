@@ -30,15 +30,30 @@ self.addEventListener('fetch', event => {
   if (url.pathname.endsWith('/api/v1/auth/logout')) event.waitUntil(caches.delete(MEDIA));
   if (req.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/health/')) return;
   if (url.pathname.startsWith('/media/')) {
-    event.respondWith(fetch(req).then(async response => {
-      if (response.ok) {
-        const cache = await caches.open(MEDIA);
-        await cache.put(req, response.clone());
-        const keys = await cache.keys();
-        if (keys.length > 100) await cache.delete(keys[0]);
+    event.respondWith((async () => {
+      const cache = await caches.open(MEDIA).catch(() => null);
+      const cached = cache && await cache.match(req);
+      // Immutable media can be reused without a network trip while fresh.
+      const storedAt = cached && Date.parse(cached.headers.get('date') || '');
+      if (cached && Date.now() - storedAt < 86400000) return cached;
+      try {
+        const response = await fetch(req);
+        if (response.ok && cache) {
+          const copy = response.clone();
+          // Storage and eviction must not delay rendering a downloaded image.
+          event.waitUntil((async () => {
+            await cache.put(req, copy);
+            const keys = await cache.keys();
+            for (const key of keys.slice(0, Math.max(0, keys.length - 100))) {
+              await cache.delete(key);
+            }
+          })().catch(() => {}));
+        }
+        return response;
+      } catch (_) {
+        return cached || Response.error();
       }
-      return response;
-    }).catch(async () => (await caches.match(req)) || Response.error()));
+    })());
     return;
   }
   event.respondWith(caches.open(SHELL).then(async cache => {

@@ -21,6 +21,40 @@ void main() {
     return api;
   }
 
+  test('diary tags carry into new and existing recipes', () async {
+    final api = await mockApi();
+    final body = {
+      'title': '炒蛋',
+      'cooked_on': '2026-11-06',
+      'tags': ['少油', '快手菜'],
+      'dishes': [
+        {'title': '炒蛋'},
+      ],
+    };
+    await api.request('POST', '/entries', body);
+    var recipes = await api.request('GET', '/recipes') as List;
+    expect(recipes.single['tags'], ['少油', '快手菜']);
+    await api.request('POST', '/entries', {
+      ...body,
+      'tags': ['少油', '聚餐'],
+    });
+    recipes = await api.request('GET', '/recipes') as List;
+    expect(recipes, hasLength(1));
+    expect(recipes.single['tags'], ['少油', '快手菜', '聚餐']);
+    await api.request('PATCH', '/recipes/${recipes.single['id']}', {
+      'title': '炒蛋',
+      'category': '',
+      'description': '',
+      'ingredients': [],
+      'steps': [],
+    });
+    expect((await api.request('GET', '/recipes') as List).single['tags'], [
+      '少油',
+      '快手菜',
+      '聚餐',
+    ]);
+  });
+
   test('recipe photos persist without a diary and support covers', () async {
     final api = await mockApi();
     final recipe = await api.request('POST', '/recipes', {

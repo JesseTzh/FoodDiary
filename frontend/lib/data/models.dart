@@ -60,7 +60,7 @@ class Diary {
 
 class Recipe {
   final String id, title, category, description, image;
-  final List<String> ingredients, steps;
+  final List<String> ingredients, steps, tags;
   final bool favorite, custom;
   final String? coverMediaId;
   final List<dynamic> photos;
@@ -72,6 +72,7 @@ class Recipe {
       image = j['image'],
       ingredients = List<String>.from(j['ingredients'] ?? []),
       steps = List<String>.from(j['steps'] ?? []),
+      tags = List<String>.from(j['tags'] ?? []),
       favorite = j['favorite'],
       custom = j['custom'],
       coverMediaId = j['cover_media_id'],

@@ -1,14 +1,104 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fooddiary/data/api.dart';
 import 'package:fooddiary/ui/cropped_photo.dart';
-import 'package:fooddiary/ui/pages.dart';
+import 'package:fooddiary/ui/dish_photo.dart';
 import 'package:fooddiary/ui/theme.dart';
 
 void main() {
+  testWidgets('scrolling a cropped photo away and back reuses decoded image', (
+    tester,
+  ) async {
+    final api = Api(mock: true);
+    final bytes = File('test/fixtures/photo.jpg').readAsBytesSync();
+    final path = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    final provider = dishImageProvider(api, path);
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView.builder(
+            controller: controller,
+            itemCount: 100,
+            itemExtent: 140,
+            itemBuilder: (_, index) => index == 0
+                ? DishPhoto(
+                    api: api,
+                    path: path,
+                    crop: const Rect.fromLTWH(.1, .1, .5, .5),
+                    width: 112,
+                    height: 112,
+                  )
+                : const SizedBox(height: 140),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => precacheImage(provider, tester.element(find.byType(DishPhoto))),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CroppedPhoto), findsOneWidget);
+    controller.jumpTo(3000);
+    await tester.pumpAndSettle();
+    expect(find.byType(CroppedPhoto), findsNothing);
+    expect(
+      PaintingBinding.instance.imageCache.statusForKey(provider).keepAlive,
+      true,
+    );
+    controller.jumpTo(0);
+    await tester.pump();
+    expect(dishImageProvider(api, path), same(provider));
+    expect(
+      find.descendant(
+        of: find.byType(CroppedPhoto),
+        matching: find.byType(CustomPaint),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      PaintingBinding.instance.imageCache.statusForKey(provider).pending,
+      false,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('mock image providers reuse cache keys across list rebuilds', () {
+    final api = Api(mock: true);
+    const path = 'data:image/png;base64,AQID';
+    final first = dishImageProvider(api, path);
+    expect(dishImageProvider(api, path), same(first));
+  });
+
+  test(
+    'list providers select stable derivatives and gallery keeps original',
+    () {
+      final api = Api()..base = 'https://food.example.com';
+      const path = '/media/assets/photo/original';
+      final first =
+          dishImageProvider(api, path, variant: 'thumbnail') as NetworkImage;
+      expect(
+        first.url,
+        'https://food.example.com/media/assets/photo/thumbnail',
+      );
+      expect(dishImageProvider(api, path, variant: 'thumbnail'), first);
+      expect(
+        (dishImageProvider(api, path, variant: 'preview') as NetworkImage).url,
+        endsWith('/preview'),
+      );
+      expect(
+        (dishImageProvider(api, path) as NetworkImage).url,
+        endsWith('/original'),
+      );
+    },
+  );
+
   for (final width in [320.0, 390.0, 768.0, 1440.0]) {
     testWidgets('cover adapts to page width $width with 1:1 ratio', (
       tester,

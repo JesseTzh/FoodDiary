@@ -71,11 +71,12 @@ type Media struct {
 	CropHeight float64 `json:"crop_height,omitempty"`
 }
 type App struct {
-	updater *androidUpdater
-	db      *sql.DB
-	data    string
-	jwtKey  []byte
-	limiter *ipLimiter
+	thumbnailMu sync.Mutex
+	updater     *androidUpdater
+	db          *sql.DB
+	data        string
+	jwtKey      []byte
+	limiter     *ipLimiter
 	// 跨源白名单（FOODDIARY_CORS_ORIGINS），为空时禁用 CORS，行为与原来一致
 	corsOrigins []string
 }
@@ -621,6 +622,25 @@ func (a *App) saveEntry(w http.ResponseWriter, r *http.Request, editing bool) {
 				d.ID = id()
 				_, e = tx.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,'','','[]','[]',0,1,'')", d.ID, d.Title, x.Category)
 			}
+			if e == nil && len(x.Tags) > 0 {
+				var raw string
+				e = tx.QueryRow("SELECT tags_json FROM recipes WHERE id=?", d.ID).Scan(&raw)
+				if e == nil {
+					var tags []string
+					json.Unmarshal([]byte(raw), &tags)
+					seen := map[string]bool{}
+					for _, tag := range tags {
+						seen[tag] = true
+					}
+					for _, tag := range x.Tags {
+						if !seen[tag] {
+							tags = append(tags, tag)
+							seen[tag] = true
+						}
+					}
+					_, e = tx.Exec("UPDATE recipes SET tags_json=? WHERE id=?", recipeTagsJSON(tags), d.ID)
+				}
+			}
 			if e != nil {
 				break
 			}
@@ -697,7 +717,7 @@ func (a *App) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, mid := range media {
-		_ = os.Remove(filepath.Join(a.data, "media", mid))
+		a.removeMediaFiles(mid)
 	}
 	writeJSON(w, 200, map[string]any{"id": id})
 }
@@ -917,10 +937,17 @@ func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	path := filepath.Join(a.data, "media", id)
+	variant := chi.URLParam(r, "variant")
+	if variant == "thumbnail" || variant == "preview" {
+		if resized, resizedMime, err := a.thumbnail(id, variant, mime); err == nil {
+			path, mime = resized, resizedMime
+		}
+	}
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeFile(w, r, filepath.Join(a.data, "media", id))
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, path)
 }
 
 func (a *App) mediaShared(mediaID string) bool {

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"github.com/go-chi/chi/v5"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -18,6 +16,7 @@ type Recipe struct {
 	Image        string   `json:"image"`
 	Ingredients  []string `json:"ingredients"`
 	Steps        []string `json:"steps"`
+	Tags         []string `json:"tags"`
 	Favorite     bool     `json:"favorite"`
 	Custom       bool     `json:"custom"`
 	CoverMediaID string   `json:"cover_media_id,omitempty"`
@@ -87,13 +86,13 @@ func (a *App) deleteRecipe(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, asset := range assets {
 		if asset.entry == "" {
-			os.Remove(filepath.Join(a.data, "media", asset.id))
+			a.removeMediaFiles(asset.id)
 		}
 	}
 	writeJSON(w, 200, map[string]any{"id": id})
 }
 func (a *App) recipes(w http.ResponseWriter, r *http.Request) {
-	rows, e := a.db.Query("SELECT id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id FROM recipes ORDER BY custom DESC,rowid")
+	rows, e := a.db.Query("SELECT id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id,tags_json FROM recipes ORDER BY custom DESC,rowid")
 	if e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
@@ -102,13 +101,14 @@ func (a *App) recipes(w http.ResponseWriter, r *http.Request) {
 	out := []Recipe{}
 	for rows.Next() {
 		var x Recipe
-		var ij, sj string
-		if e := rows.Scan(&x.ID, &x.Title, &x.Category, &x.Description, &x.Image, &ij, &sj, &x.Favorite, &x.Custom, &x.CoverMediaID); e != nil {
+		var ij, sj, tj string
+		if e := rows.Scan(&x.ID, &x.Title, &x.Category, &x.Description, &x.Image, &ij, &sj, &x.Favorite, &x.Custom, &x.CoverMediaID, &tj); e != nil {
 			errJSON(w, 500, "DB", e.Error())
 			return
 		}
 		json.Unmarshal([]byte(ij), &x.Ingredients)
 		json.Unmarshal([]byte(sj), &x.Steps)
+		json.Unmarshal([]byte(tj), &x.Tags)
 		x.Photos = a.recipeMedia(x.ID)
 		out = append(out, x)
 	}
@@ -166,6 +166,13 @@ func (a *App) saveRecipe(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "VALIDATION_ERROR", "请填写菜谱名称，食材和步骤各最多 100 项")
 		return
 	}
+	if x.Ingredients == nil {
+		x.Ingredients = []string{}
+	}
+	if x.Steps == nil {
+		x.Steps = []string{}
+	}
+	x.Title = strings.TrimSpace(x.Title)
 	x.ID = id()
 	x.Custom = true
 	x.Image = ""
@@ -173,7 +180,7 @@ func (a *App) saveRecipe(w http.ResponseWriter, r *http.Request) {
 	sj, _ := json.Marshal(x.Steps)
 	if r.Method == http.MethodPatch {
 		x.ID = chi.URLParam(r, "id")
-		res, e := a.db.Exec("UPDATE recipes SET title=?,category=?,description=?,ingredients_json=?,steps_json=? WHERE id=?", strings.TrimSpace(x.Title), x.Category, x.Description, ij, sj, x.ID)
+		res, e := a.db.Exec("UPDATE recipes SET title=?,category=?,description=?,ingredients_json=?,steps_json=?,tags_json=COALESCE(?,tags_json) WHERE id=?", strings.TrimSpace(x.Title), x.Category, x.Description, ij, sj, recipeTagsJSON(x.Tags), x.ID)
 		if e != nil {
 			errJSON(w, 500, "DB", e.Error())
 			return
@@ -182,13 +189,15 @@ func (a *App) saveRecipe(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, 404, "NOT_FOUND", "未找到菜谱")
 			return
 		}
-		a.db.QueryRow("SELECT favorite,custom,image,cover_media_id FROM recipes WHERE id=?", x.ID).Scan(&x.Favorite, &x.Custom, &x.Image, &x.CoverMediaID)
+		var tagsJSON string
+		a.db.QueryRow("SELECT favorite,custom,image,cover_media_id,tags_json FROM recipes WHERE id=?", x.ID).Scan(&x.Favorite, &x.Custom, &x.Image, &x.CoverMediaID, &tagsJSON)
+		json.Unmarshal([]byte(tagsJSON), &x.Tags)
 		x.Title = strings.TrimSpace(x.Title)
 		x.Photos = a.recipeMedia(x.ID)
 		writeJSON(w, 200, x)
 		return
 	}
-	if _, e := a.db.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id) VALUES(?,?,?,?,?,?,?,?,?,'')", x.ID, x.Title, x.Category, x.Description, x.Image, ij, sj, x.Favorite, x.Custom); e != nil {
+	if _, e := a.db.Exec("INSERT INTO recipes(id,title,category,description,image,ingredients_json,steps_json,favorite,custom,cover_media_id,tags_json) VALUES(?,?,?,?,?,?,?,?,?,'',COALESCE(?,'[]'))", x.ID, x.Title, x.Category, x.Description, x.Image, ij, sj, x.Favorite, x.Custom, recipeTagsJSON(x.Tags)); e != nil {
 		errJSON(w, 500, "DB", e.Error())
 		return
 	}
@@ -257,4 +266,13 @@ func (a *App) saveProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.profile(w, r)
+}
+
+// nil means the caller omitted tags during an edit; preserve existing tags.
+func recipeTagsJSON(tags []string) any {
+	if tags == nil {
+		return nil
+	}
+	raw, _ := json.Marshal(tags)
+	return string(raw)
 }

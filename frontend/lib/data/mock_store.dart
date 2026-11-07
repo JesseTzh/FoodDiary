@@ -186,7 +186,9 @@ class MockStore {
         'description',
         'ingredients',
         'steps',
+        'tags',
       ]) {
+        if (key == 'tags' && !data.containsKey(key)) continue;
         recipe[key] = data[key];
       }
       result = recipe;
@@ -251,12 +253,17 @@ class MockStore {
       if (found != null) {
         dish['id'] = found['id'];
         dish['title'] = found['title'];
+        found['tags'] = {
+          ...List<String>.from(found['tags'] ?? []),
+          ...List<String>.from(data['tags'] ?? []),
+        }.toList();
       } else {
         dish['id'] = _id();
         recipes.insert(0, {
           'id': dish['id'],
           'title': dish['title'],
           'category': data['category'] ?? '家常菜',
+          'tags': List<String>.from(data['tags'] ?? []),
           'description': '',
           'image': '',
           'ingredients': [],

@@ -818,7 +818,8 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
         .where(
           (r) =>
               (category == '全部' || r.category == category) &&
-              r.title.contains(search),
+              (r.title.contains(search) ||
+                  r.tags.any((t) => t.contains(search))),
         )
         .toList();
     return CustomScrollView(

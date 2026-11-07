@@ -1479,7 +1479,14 @@ class _RecipePageState extends State<RecipePage> {
             style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 10),
-          Align(alignment: Alignment.centerLeft, child: Tag(r.category)),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: {
+              if (r.category.isNotEmpty) r.category,
+              ...r.tags,
+            }.map((tag) => Tag(tag)).toList(),
+          ),
           const SizedBox(height: 18),
           PhotoGallery(
             key: ValueKey(
@@ -1574,7 +1581,8 @@ class _NewRecipePageState extends State<NewRecipePage> {
   final title = TextEditingController(),
       description = TextEditingController(),
       ingredients = TextEditingController(),
-      steps = TextEditingController();
+      steps = TextEditingController(),
+      tags = TextEditingController();
   String category = '家常菜';
   bool busy = false;
   final List<XFile> files = [];
@@ -1613,22 +1621,25 @@ class _NewRecipePageState extends State<NewRecipePage> {
       ingredients.text = r.ingredients.join('\n');
       steps.text = r.steps.join('\n');
       category = r.category;
+      tags.text = r.tags.join('，');
     }
   }
 
   @override
   void dispose() {
-    for (final c in [title, description, ingredients, steps]) {
+    for (final c in [title, description, ingredients, steps, tags]) {
       c.dispose();
     }
     super.dispose();
   }
 
   Future<void> save() async {
-    if (title.text.trim().isEmpty ||
-        ingredients.text.trim().isEmpty ||
-        steps.text.trim().isEmpty) {
-      toast(context, '请填写菜名、食材和做法');
+    if (title.text.trim().isEmpty) {
+      toast(context, '请填写菜名');
+      return;
+    }
+    if (files.isEmpty && (widget.recipe?.photos.isEmpty ?? true)) {
+      toast(context, '请选择菜谱图片');
       return;
     }
     setState(() => busy = true);
@@ -1641,6 +1652,12 @@ class _NewRecipePageState extends State<NewRecipePage> {
         {
           'title': title.text.trim(),
           'description': description.text.trim(),
+          'tags': tags.text
+              .split(RegExp(r'[,，\n]'))
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toSet()
+              .toList(),
           'category': category,
           'ingredients': ingredients.text
               .split('\n')
@@ -1781,7 +1798,13 @@ class _NewRecipePageState extends State<NewRecipePage> {
               .toList(),
         ),
         const SizedBox(height: 24),
-        label('准备食材'),
+        label('标签（选填）'),
+        TextField(
+          controller: tags,
+          decoration: const InputDecoration(hintText: '用逗号分隔标签'),
+        ),
+        const SizedBox(height: 24),
+        label('准备食材（选填）'),
         TextField(
           controller: ingredients,
           maxLines: 4,
@@ -1789,7 +1812,7 @@ class _NewRecipePageState extends State<NewRecipePage> {
           decoration: const InputDecoration(hintText: '每行一种食材\n鸡蛋 3 个\n番茄 2 个'),
         ),
         const SizedBox(height: 16),
-        label('做法步骤'),
+        label('做法步骤（选填）'),
         TextField(
           controller: steps,
           maxLines: 5,

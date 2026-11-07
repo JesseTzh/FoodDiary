@@ -24,7 +24,24 @@ class DishPhoto extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    final photo = path == null ? placeholder() : _photo();
+    final photo = path == null
+        ? placeholder()
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              final logicalWidth = constraints.hasBoundedWidth
+                  ? constraints.maxWidth
+                  : 440.0;
+              final logicalHeight = constraints.hasBoundedHeight
+                  ? constraints.maxHeight
+                  : logicalWidth;
+              final pixels =
+                  (logicalWidth > logicalHeight
+                      ? logicalWidth
+                      : logicalHeight) *
+                  MediaQuery.devicePixelRatioOf(context);
+              return _photo(pixels <= 384 ? 'thumbnail' : 'preview');
+            },
+          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -36,8 +53,8 @@ class DishPhoto extends StatelessWidget {
     );
   }
 
-  Widget _photo() {
-    final provider = dishImageProvider(api, path!);
+  Widget _photo(String variant) {
+    final provider = dishImageProvider(api, path!, variant: variant);
     final selection = crop;
     if (selection != null &&
         (selection.width < .99 || selection.height < .99)) {
@@ -81,13 +98,49 @@ Rect? cropFromMedia(dynamic media) {
   );
 }
 
-ImageProvider dishImageProvider(Api api, String path) {
+// Scope mock byte caches to the API instance and bound retained bytes. Repeated
+// base64 decoding used to give MemoryImage a different cache key every build.
+final _memoryImages = Expando<_MemoryImages>();
+
+class _MemoryImages {
+  final images = <String, MemoryImage>{};
+  int bytes = 0;
+  MemoryImage get(String path) {
+    final cached = images.remove(path);
+    if (cached != null) {
+      images[path] = cached;
+      return cached;
+    }
+    final image = MemoryImage(base64Decode(path.split(',').last));
+    const limit = 24 * 1024 * 1024;
+    if (image.bytes.lengthInBytes > limit) return image;
+    while (images.isNotEmpty &&
+        (bytes + image.bytes.lengthInBytes > limit || images.length >= 64)) {
+      bytes -= images.remove(images.keys.first)!.bytes.lengthInBytes;
+    }
+    images[path] = image;
+    bytes += image.bytes.lengthInBytes;
+    return image;
+  }
+}
+
+ImageProvider dishImageProvider(Api api, String path, {String? variant}) {
   final ImageProvider provider;
   if (api.mock && path.startsWith('asset:')) {
     provider = AssetImage(path.substring(6));
   } else if (api.mock && path.startsWith('data:')) {
-    provider = MemoryImage(base64Decode(path.split(',').last));
+    provider = (_memoryImages[api] ??= _MemoryImages()).get(path);
   } else {
+    if (variant != null) {
+      final uri = Uri.parse(path);
+      if (RegExp(r'^/media/assets/[^/]+/original$').hasMatch(uri.path)) {
+        path = uri
+            .replace(
+              path: uri.path.replaceFirst(RegExp(r'/original$'), '/$variant'),
+            )
+            .toString();
+      }
+    }
     provider = NetworkImage(
       api.url(path),
       headers: kIsWeb ? null : api.headers,
