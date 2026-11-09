@@ -928,7 +928,7 @@ func nullableString(s string) any {
 // 已开放给游客的记录，其照片允许未登录访问；其余仍要求有效会话。
 func (a *App) mediaFile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !a.mediaShared(id) && !a.authed(r) {
+	if !a.mediaShared(id) && !a.authed(r) && !a.orderMediaAllowed(r, id) {
 		errJSON(w, 401, "UNAUTHORIZED", "authentication required")
 		return
 	}
@@ -1044,6 +1044,8 @@ func routes(a *App) http.Handler {
 		r.Post("/auth/refresh", a.authRefresh)
 		r.Post("/auth/logout", a.authLogout)
 		// 游客浏览：公开只读接口，仅暴露标记为开放的记录
+		r.Get("/guest/order/{token}", a.guestMenu)
+		r.Post("/guest/order/{token}/orders", a.placeGuestOrder)
 		r.Get("/guest/entries", a.guestEntries)
 		r.Get("/guest/entries/{id}", a.guestGet)
 		r.Group(func(r chi.Router) {
@@ -1058,6 +1060,8 @@ func routes(a *App) http.Handler {
 			r.Post("/entries/{id}/guest-share", a.guestShare)
 			r.Get("/stats", a.stats)
 			a.kitchenRoutes(r)
+			r.Get("/order-links", a.orderLinks)
+			r.Post("/order-links", a.orderLinks)
 			r.Get("/export", a.export)
 			r.Get("/tags", func(w http.ResponseWriter, r *http.Request) {
 				rows, _ := a.db.Query("SELECT DISTINCT tag FROM entry_tags ORDER BY tag")

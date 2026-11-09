@@ -70,6 +70,86 @@ class MockStore {
     }
   }
 
+  Future<dynamic> _guestOrdering(
+    String method,
+    Uri uri,
+    Map<String, dynamic> data,
+  ) async {
+    final links = state.putIfAbsent('order_links', () => <dynamic>[]) as List;
+    final parts = uri.path.split('/').where((p) => p.isNotEmpty).toList();
+    if (uri.path == '/order-links') {
+      if (method == 'GET') return _copy(links.reversed.toList());
+      final expires =
+          DateTime.tryParse(data['expires_at'] as String? ?? '') ??
+          DateTime.now().add(const Duration(days: 7));
+      if (!expires.isAfter(DateTime.now()) ||
+          expires.isAfter(DateTime.now().add(const Duration(days: 90)))) {
+        throw ApiError(400, '请选择未来 90 天内的过期时间');
+      }
+      final link = {
+        'id': _id(),
+        'title': (data['title'] as String? ?? '').trim().isEmpty
+            ? '来宾点菜'
+            : data['title'],
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'expires_at': expires.toUtc().toIso8601String(),
+        'orders': <dynamic>[],
+      };
+      links.add(link);
+      await _save();
+      return _copy(link);
+    }
+    if (parts.length < 3) throw ApiError(404, '点菜链接不存在');
+    final link = _find(links, parts[2]);
+    if (!DateTime.parse(link['expires_at']).isAfter(DateTime.now())) {
+      throw ApiError(410, '点菜链接已过期，请联系主人重新分享');
+    }
+    if (method == 'GET') {
+      return {
+        'title': link['title'],
+        'expires_at': link['expires_at'],
+        'recipes': _copy(recipes),
+      };
+    }
+    final orders = link['orders'] as List;
+    final existing = orders
+        .where((o) => o['request_id'] == data['request_id'])
+        .firstOrNull;
+    if (existing != null) return _copy(existing);
+    final items = data['items'] as List? ?? [];
+    if (items.isEmpty || items.length > 100) throw ApiError(400, '请选择菜品');
+    final seen = <String>{};
+    final savedItems = <Map<String, dynamic>>[];
+    for (final item in items) {
+      final recipe = _find(recipes, item['recipe_id']);
+      final quantity = item['quantity'] as int;
+      if (quantity < 1 || quantity > 99 || !seen.add(recipe['id'])) {
+        throw ApiError(400, '菜品数量无效');
+      }
+      savedItems.add({
+        'recipe_id': recipe['id'],
+        'title': recipe['title'],
+        'quantity': quantity,
+      });
+    }
+    final guestName = (data['guest_name'] as String? ?? '').trim();
+    final note = (data['note'] as String? ?? '').trim();
+    if (guestName.runes.length > 30 || note.runes.length > 200) {
+      throw ApiError(400, '称呼最多 30 字，备注最多 200 字');
+    }
+    final order = {
+      'id': _id(),
+      'request_id': data['request_id'],
+      'guest_name': guestName.isEmpty ? '来宾' : guestName,
+      'note': note,
+      'items': savedItems,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    orders.insert(0, order);
+    await _save();
+    return _copy(order);
+  }
+
   Future<dynamic> request(String method, String path, [Object? body]) async {
     final uri = Uri.parse(path);
     final parts = uri.path.split('/').where((p) => p.isNotEmpty).toList();
@@ -89,7 +169,11 @@ class MockStore {
       await _save();
       return {'authenticated': true};
     }
+    if (uri.path.startsWith('/guest/order/')) {
+      return _guestOrdering(method, uri, data);
+    }
     if (state['authenticated'] != true) throw ApiError(401, '请先登录');
+    if (uri.path == '/order-links') return _guestOrdering(method, uri, data);
     if (path == '/auth/logout' && method == 'POST') {
       state['authenticated'] = false;
       result = {'ok': true};

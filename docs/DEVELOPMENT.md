@@ -68,8 +68,11 @@ scripts/build-pwa.py             根据实际构建资源生成版本化离线�
 | PATCH | `/recipes/{id}/favorite` | 收藏或取消收藏 |
 | GET | `/profile` | 昵称、简介、记录数、创建菜谱数、收藏数 |
 | PATCH | `/profile` | 更新 name / bio |
+| GET / POST | `/order-links` | 查看点菜分享和订单 / 创建分享（需登录） |
+| GET | `/guest/order/{token}` | 来宾菜单（无需登录，有效链接可访问） |
+| POST | `/guest/order/{token}/orders` | 来宾下单（无需登录，有效链接可访问） |
 
-以上业务接口均需要登录。访问令牌为 HS256 JWT（`golang-jwt/jwt/v5 v5.3.1`），有效 15 分钟，严格验证算法、签名、issuer、audience、subject、exp、iat、nbf、jti 和 sid，且每次检查数据库会话是否仍有效。Web 会话固定 7 天、Android 固定 30 天；刷新不延长期限。每次登录创建独立会话，支持多端同时在线，单端退出或刷新令牌重放只撤销该端的会话；配置密码不变时重启保留会话，密码真正变化时原子地更新密码并撤销所有端的会话。刷新令牌为 32 字节随机值，数据库只保存 SHA-256 哈希；原令牌轮换后保留消费记录，重放会撤销整个会话，退出同样即时撤销访问 JWT。
+除来宾点菜接口外，以上业务接口均需要登录。访问令牌为 HS256 JWT（`golang-jwt/jwt/v5 v5.3.1`），有效 15 分钟，严格验证算法、签名、issuer、audience、subject、exp、iat、nbf、jti 和 sid，且每次检查数据库会话是否仍有效。Web 会话固定 7 天、Android 固定 30 天；刷新不延长期限。每次登录创建独立会话，支持多端同时在线，单端退出或刷新令牌重放只撤销该端的会话；配置密码不变时重启保留会话，密码真正变化时原子地更新密码并撤销所有端的会话。刷新令牌为 32 字节随机值，数据库只保存 SHA-256 哈希；原令牌轮换后保留消费记录，重放会撤销整个会话，退出同样即时撤销访问 JWT。
 
 Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在路径 `/api/v1/auth` 的 `fooddiary_refresh` HttpOnly Cookie；刷新接口无需有效访问 JWT。Android 登录、刷新请求必须带 `X-FoodDiary-Client: app`，响应 `X-Session-Token` 和 `X-Refresh-Token` 分别提供访问和刷新令牌，存入 flutter_secure_storage；业务请求使用访问 JWT 的 `Authorization: Bearer <token>`，刷新和退出则使用刷新令牌。浏览器响应不暴露令牌头。
 
@@ -96,6 +99,12 @@ Web 访问 JWT 放在 `fooddiary_session` HttpOnly Cookie，刷新令牌放在�
 - 相机/相册客户端按最长边 1600、质量 85 处理；服务器接受 JPEG、PNG、WebP、GIF，最多 9 张，每张最多 20 MiB；超限拒绝，不截断文件。
 - 创建菜谱的 ingredients / steps 为字符串数组；每行一个食材或步骤。
 - 所有导航统计基于实际业务记录。前端「记录天数」按不同日期去重；profile 的 entry_count 是日记条数。
+
+## 来宾点菜
+
+「我的 → 来宾点菜」展示分享及其订单，支持下拉、手动刷新，并每 30 秒自动刷新。右下角加号创建分享，可填写名称并选择一天、一周（默认）、一个月或自定义日期时间（未来 90 天内）。链接复制后可通过聊天工具发送。Android 使用配置的后端地址生成 Web 链接，因此后端应部署配套 Web 页面。
+
+分享链接使用 `?guest_order=<token>#/` 打开公开菜单，无需厨房密码。菜单展示当前全部菜谱，左侧按菜谱标签筛选，购物车支持增减数量（每道菜 1–99 份），下单可填写称呼和备注。分享过期后无法继续浏览菜单或下单，已有订单仍保留在主人记录中。订单保存下单时的菜名快照，后续编辑或删除菜谱不影响记录。每笔提交带 `request_id`，相同链接内重复提交返回已有订单，避免网络重试重复下单。分享令牌为随机值，菜谱照片通过有效分享令牌访问，不会公开其他日记照片。
 
 ## PWA 行为
 

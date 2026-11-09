@@ -10,6 +10,7 @@ import 'ui/web_assets.dart';
 import 'ui/app_update.dart';
 import 'ui/daily_hero.dart';
 import 'ui/pages.dart';
+import 'ui/guest_ordering.dart';
 import 'ui/server_configuration_page.dart';
 import 'version.dart';
 
@@ -27,6 +28,7 @@ class FoodDiaryApp extends StatefulWidget {
 
 class _FoodDiaryAppState extends State<FoodDiaryApp> {
   late final api = widget.api ?? Api();
+  final sharedOrderToken = guestOrderToken(Uri.base);
   bool ready = false;
   bool configuringServer = false;
   @override
@@ -47,8 +49,11 @@ class _FoodDiaryAppState extends State<FoodDiaryApp> {
     title: '做饭日记',
     debugShowCheckedModeBanner: false,
     theme: kitchenTheme(),
+    initialRoute: '/',
     home: !ready
         ? const _OpeningPage()
+        : sharedOrderToken != null
+        ? GuestMenuPage(api: api, token: sharedOrderToken!)
         : configuringServer
         ? ServerConfigurationPage(
             api: api,
@@ -1048,6 +1053,11 @@ class _KitchenState extends State<Kitchen> with WidgetsBindingObserver {
                   title: '我的菜谱',
                 ),
               ),
+            ),
+            menu(
+              Icons.restaurant_menu,
+              '来宾点菜',
+              () => open(GuestOrderRecordsPage(api: api)),
             ),
             menu(
               Icons.settings_outlined,

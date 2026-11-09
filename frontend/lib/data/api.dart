@@ -201,7 +201,9 @@ class Api {
 
   Future<dynamic> _request(String method, String path, Object? body) async {
     if (mock) return _mockStore!.request(method, path, body);
-    final canRefresh = !path.startsWith('/auth/') || path == '/auth/status';
+    final canRefresh =
+        !path.startsWith('/guest/') &&
+        (!path.startsWith('/auth/') || path == '/auth/status');
     if (canRefresh) await _ensureAccess();
     final generation = _tokenGeneration;
     var res = await _send(method, path, body);
