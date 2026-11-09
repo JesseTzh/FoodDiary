@@ -34,6 +34,8 @@ Go 服务同时提供 API、照片和 Web 文件。生产环境建议使用同�
 
 PR 只检查并上传 Artifact，不发布。分支推送发布 `ci-<完整 commit SHA>` APK 预发布，标签推送发布同名 Release。Docker 镜像只在默认分支或 `v*` 标签发布；服务器只部署默认分支。手动指定标签只发布该标签的 APK，不更新默认分支的 Docker、服务器或 Pages。
 
+构建任务统一固定在 Ubuntu 24.04，Action 使用完整提交 SHA，并在注释中标注对应发布版本。JavaScript Action 使用 Node 24 运行时。Flutter 缓存由工作流中固定 SHA 的 `actions/cache` 管理。Buildx 固定版本，BuildKit、QEMU 和 Dockerfile 基础镜像使用可读的版本标签（例如 `ubuntu:24.04`）；Gradle Wrapper 固定版本并校验分发包 SHA-256。更新依赖时需同时核对版本标签、Action 提交，以及运行时兼容性。
+
 Web 启动检查在 Docker 镜像上运行 Chromium。它检查首次设置密码、登录后首页和重启后的数据。Artifact `fooddiary-web-startup` 包含截图、浏览器日志、Playwright trace 和容器日志，保留 14 天。失败时也会保存诊断材料。当前容器启动检查使用 amd64；发布镜像同时构建 amd64 和 arm64。
 
 Android 启动检查使用 Android 15（API 35）x86_64 模拟器。检查会安装本次构建的 APK，并查看应用进程、前台 Activity 和致命错误日志。Artifact `fooddiary-android-startup` 包含截图和日志，保留 14 天。该检查只验证启动，不验证登录和 API 功能。
@@ -41,6 +43,8 @@ Android 启动检查使用 Android 15（API 35）x86_64 模拟器。检查会安
 ## 界面截图与图册
 
 Pipeline 的 `mock-screenshots` 任务使用 `MOCK_API=true` 构建独立 Web 前端，再用 Playwright 截取手机和桌面页面，与 Android 构建并行运行。手机视口为 390×844，桌面视口为 1440×1080。截图覆盖首页、日记、记录、菜谱、收藏、个人资料、设置和登录流程。正式 APK 不启用模拟数据。
+
+来宾点菜截图覆盖点菜记录、创建分享、来宾菜单、购物车和下单成功。菜单通过未登录的分享链接打开，测试会核对保存的来宾称呼、口味备注、菜品和份数。截图使用固定时间与独立分享数据，避免链接随真实时间过期。图册中的界面与截图数量从页面清单自动计算。
 
 Artifact `fooddiary-mock-pages` 包含页面截图、语义快照、页面清单、浏览器日志和 Playwright trace，保留 14 天。测试通过页面语义确认导航成功。任何真实后端请求都会失败。测试提供人工检查用的截图，不执行像素基线比较。
 

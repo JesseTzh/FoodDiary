@@ -39,6 +39,7 @@ try {
         }],
         recipes: [{
           id: 'ci-recipe', title: '番茄炒蛋', category: '家常菜',
+          tags: ['家常菜', '快手菜'],
           description: '截图测试菜谱', image: '', ingredients: ['番茄', '鸡蛋'],
           steps: ['翻炒后装盘'], favorite: true, custom: true,
           photos: [{
@@ -48,10 +49,23 @@ try {
             crop_x: 0, crop_y: 0, crop_width: 1, crop_height: 1,
           }], cover_media_id: 'ci-recipe-photo',
         }],
+        order_links: [{
+          id: 'ci-guest-menu', title: '周末来家里吃饭',
+          created_at: '2026-11-09T02:00:00Z',
+          expires_at: '2026-11-16T04:00:00Z',
+          orders: [{
+            id: 'ci-guest-order', request_id: 'ci-guest-order-request',
+            guest_name: '小王', note: '少放一点盐',
+            created_at: '2026-11-09T03:00:00Z',
+            items: [{ recipe_id: 'ci-recipe', title: '番茄炒蛋', quantity: 2 }],
+          }],
+        }],
       };
       localStorage.setItem(key, JSON.stringify(JSON.stringify(state)));
     });
     const page = await context.newPage();
+    // Keep fixture expiry, relative dates, and submitted order times repeatable.
+    await page.clock.setFixedTime(new Date('2026-11-09T04:00:00Z'));
     const logs = [], errors = [], captured = [];
     let current = 'startup';
     page.on('console', message => logs.push(`${message.type()}: ${message.text()}`));
@@ -126,6 +140,12 @@ try {
         await capture(name, page.getByText(ready, { exact: false }).first());
         await back(text('我的收藏'));
       }
+      await click(text('来宾点菜'));
+      await capture('guest-order-records', page.getByRole('group', { name: /周末来家里吃饭.*小王/ }));
+      await click(page.getByRole('button', { name: '创建点菜分享', exact: true }));
+      await capture('guest-order-share', text('创建链接'));
+      await click(text('取消'));
+      await back(text('我的收藏'));
       await click(text('设置'));
       await capture('settings', text('保存资料'));
       await click(text('退出小厨房'));
@@ -141,6 +161,46 @@ try {
       await expect(page.locator('#loading')).toHaveCount(0, { timeout: 60_000 });
       await page.locator('flt-semantics-placeholder').evaluate(element => element.click());
       await capture('setup', id('first-run-password-prompt'));
+      // Open the actual shared URL while logged out: guests must bypass login.
+      await page.evaluate(() => {
+        const key = 'flutter.fooddiary:mock:v1';
+        const state = JSON.parse(JSON.parse(localStorage.getItem(key)));
+        state.auth_required = true;
+        localStorage.setItem(key, JSON.stringify(JSON.stringify(state)));
+      });
+      await page.goto(`${baseURL}/?guest_order=ci-guest-menu#/`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#loading')).toHaveCount(0, { timeout: 60_000 });
+      await page.locator('flt-semantics-placeholder').evaluate(element => element.click());
+      await capture('guest-menu', text('今天想吃什么？'));
+      await expect(id('login-password-prompt')).toHaveCount(0);
+      await click(page.getByRole('button', { name: '添加一份', exact: true }).first());
+      await click(page.getByRole('button', { name: '购物车 (1)', exact: true }));
+      // Focus before typing so Flutter attaches its native editing controller.
+      // Filling an unfocused semantics input can lose the value on mobile.
+      for (const [label, value] of [
+        ['怎么称呼你（选填）', '小李'],
+        ['口味或其他备注（选填）', '少放一点盐'],
+      ]) {
+        const input = page.getByRole('textbox', { name: label });
+        await click(input);
+        await expect(input).toBeFocused();
+        await page.evaluate(() => new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await input.pressSequentially(value, { delay: 50 });
+        await expect(input).toHaveValue(value);
+        await input.press('Tab');
+      }
+      await capture('guest-cart', text('下单 · 共 1 份'));
+      await click(text('下单 · 共 1 份'));
+      await capture('guest-order-success', text('下单成功'));
+      await expect.poll(() => page.evaluate(() => {
+        const state = JSON.parse(JSON.parse(localStorage.getItem('flutter.fooddiary:mock:v1')));
+        const order = state.order_links.find(link => link.id === 'ci-guest-menu').orders[0];
+        return { authenticated: state.authenticated, name: order.guest_name, note: order.note, items: order.items };
+      })).toEqual({
+        authenticated: false, name: '小李', note: '少放一点盐',
+        items: [{ recipe_id: 'ci-recipe', title: '番茄炒蛋', quantity: 1 }],
+      });
       expect(captured).toEqual(requiredPages);
       expect(errors, 'Browser errors and unexpected backend calls').toEqual([]);
       await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ layout, viewport, pages: captured }, null, 2));

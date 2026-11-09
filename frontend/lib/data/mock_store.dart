@@ -108,7 +108,13 @@ class MockStore {
       return {
         'title': link['title'],
         'expires_at': link['expires_at'],
-        'recipes': _copy(recipes),
+        'recipes': [
+          for (final recipe in recipes)
+            {
+              ...Map<String, dynamic>.from(_copy(recipe)),
+              'last_cooked_on': _lastCookedOn(recipe),
+            },
+        ],
       };
     }
     final orders = link['orders'] as List;
@@ -320,6 +326,23 @@ class MockStore {
     }
     await _save();
     return _copy(result);
+  }
+
+  String _lastCookedOn(Map recipe) {
+    final dates =
+        entries
+            .where((entry) {
+              if (entry['deleted_at'] != null) return false;
+              final dishes = entry['dishes'] as List? ?? [];
+              return dishes.isEmpty
+                  ? entry['title'].toString().toLowerCase() ==
+                        recipe['title'].toString().toLowerCase()
+                  : dishes.any((dish) => dish['id'] == recipe['id']);
+            })
+            .map((entry) => entry['cooked_on'] as String)
+            .toList()
+          ..sort();
+    return dates.lastOrNull ?? '';
   }
 
   List<Map<String, dynamic>> _resolveDishes(Map<String, dynamic> data) {

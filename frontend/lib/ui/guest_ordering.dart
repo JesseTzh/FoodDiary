@@ -484,6 +484,7 @@ class _GuestMenuPageState extends State<GuestMenuPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, update) => Padding(
           padding: EdgeInsets.only(
@@ -646,12 +647,40 @@ class _GuestMenuPageState extends State<GuestMenuPage> {
           ),
         ],
       ),
-      floatingActionButton: menu == null || submitted != null
+      bottomNavigationBar: menu == null || submitted != null || error != null
           ? null
-          : FloatingActionButton.extended(
-              onPressed: checkout,
-              icon: const Icon(Icons.shopping_bag_outlined),
-              label: Text('购物车 ($count)'),
+          : SafeArea(
+              top: false,
+              child: ColoredBox(
+                color: paper,
+                child: Center(
+                  heightFactor: 1,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1120),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              count == 0 ? '挑几道喜欢的菜吧' : '已选 $count 份菜',
+                              style: const TextStyle(color: muted),
+                            ),
+                          ),
+                          FilledButton.icon(
+                            onPressed: checkout,
+                            icon: const Icon(Icons.shopping_bag_outlined),
+                            label: Text('购物车 ($count)'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
       body: submitted != null
           ? _receipt()
@@ -677,166 +706,182 @@ class _GuestMenuPageState extends State<GuestMenuPage> {
             )
           : menu == null
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          '今天想吃什么？',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
+          : Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1120),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final desktop = constraints.maxWidth >= 760;
+                    return Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            desktop ? 24 : 16,
+                            8,
+                            desktop ? 24 : 16,
+                            20,
                           ),
-                        ),
-                      ),
-                      Text(
-                        '有效至 ${orderTime(menu!['expires_at'])}',
-                        style: const TextStyle(color: muted, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        width: 88,
-                        child: ColoredBox(
-                          color: const Color(0xFFFFEFD9),
-                          child: ListView(
+                          child: Wrap(
+                            spacing: 24,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              for (final tag in tags)
-                                Material(
-                                  color: selectedTag == tag
-                                      ? Colors.white
-                                      : Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () =>
-                                        setState(() => selectedTag = tag),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 20,
-                                      ),
-                                      child: Text(
-                                        tag,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: selectedTag == tag
-                                              ? ink
-                                              : muted,
-                                          fontWeight: selectedTag == tag
-                                              ? FontWeight.w700
-                                              : FontWeight.normal,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                              const Text(
+                                '今天想吃什么？',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
                                 ),
+                              ),
+                              Text(
+                                '有效至 ${orderTime(menu!['expires_at'])}',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: visible.isEmpty
-                            ? const Center(child: Text('暂无菜谱'))
-                            : ListView.separated(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  0,
-                                  12,
-                                  100,
-                                ),
-                                itemCount: visible.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 12),
-                                itemBuilder: (context, i) {
-                                  final r = visible[i];
-                                  final photos = r['photos'] as List? ?? [];
-                                  final cover =
-                                      photos
-                                          .where(
-                                            (p) =>
-                                                p['id'] == r['cover_media_id'],
-                                          )
-                                          .firstOrNull ??
-                                      photos.firstOrNull;
-                                  final image =
-                                      cover?['url'] as String? ??
-                                      ((r['image'] as String? ?? '').isEmpty
-                                          ? null
-                                          : r['image'] as String);
-                                  return CozyCard(
-                                    padding: const EdgeInsets.all(10),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        if (image != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 10,
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
+                                width: desktop ? 160 : 76,
+                                child: ColoredBox(
+                                  color: const Color(0xFFFFEFD9),
+                                  child: ListView(
+                                    children: [
+                                      for (final tag in tags)
+                                        Material(
+                                          color: selectedTag == tag
+                                              ? paper
+                                              : Colors.transparent,
+                                          child: InkWell(
+                                            onTap: () => setState(
+                                              () => selectedTag = tag,
                                             ),
-                                            child: DishPhoto(
-                                              api: widget.api,
-                                              path: image,
-                                              height: 126,
-                                              width: double.infinity,
-                                              crop: cropFromMedia(cover),
-                                            ),
-                                          ),
-                                        Text(
-                                          r['title'],
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        if ((r['description'] as String)
-                                            .isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: 6,
-                                            ),
-                                            child: Text(
-                                              r['description'],
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: muted,
-                                                fontSize: 12,
+                                            child: Padding(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: desktop ? 20 : 8,
+                                                vertical: 20,
                                               ),
-                                            ),
-                                          ),
-                                        Row(
-                                          children: [
-                                            Expanded(
                                               child: Text(
-                                                (r['tags'] as List).join(' · '),
-                                                style: const TextStyle(
-                                                  color: muted,
-                                                  fontSize: 11,
+                                                tag,
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color: selectedTag == tag
+                                                      ? ink
+                                                      : muted,
+                                                  fontWeight: selectedTag == tag
+                                                      ? FontWeight.w700
+                                                      : FontWeight.normal,
                                                 ),
                                               ),
                                             ),
-                                            quantity(r['id']),
-                                          ],
+                                          ),
                                         ),
-                                      ],
-                                    ),
-                                  );
-                                },
+                                    ],
+                                  ),
+                                ),
                               ),
-                      ),
-                    ],
-                  ),
+                              Expanded(
+                                child: ColoredBox(
+                                  color: paper,
+                                  child: visible.isEmpty
+                                      ? const Center(child: Text('暂无菜谱'))
+                                      : ListView.separated(
+                                          padding: EdgeInsets.fromLTRB(
+                                            desktop ? 28 : 12,
+                                            16,
+                                            desktop ? 28 : 12,
+                                            24,
+                                          ),
+                                          itemCount: visible.length,
+                                          separatorBuilder: (_, _) =>
+                                              const Padding(
+                                                padding: EdgeInsets.symmetric(
+                                                  vertical: 16,
+                                                ),
+                                                child: Divider(height: 1),
+                                              ),
+                                          itemBuilder: (context, i) =>
+                                              _menuItem(visible[i], desktop),
+                                        ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-              ],
+              ),
             ),
+    );
+  }
+
+  Widget _menuItem(Map recipe, bool desktop) {
+    final photos = recipe['photos'] as List? ?? [];
+    final cover =
+        photos
+            .where((photo) => photo['id'] == recipe['cover_media_id'])
+            .firstOrNull ??
+        photos.firstOrNull;
+    final image =
+        cover?['url'] as String? ??
+        ((recipe['image'] as String? ?? '').isEmpty
+            ? null
+            : recipe['image'] as String);
+    final lastCookedOn = recipe['last_cooked_on'] as String? ?? '';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final imageSize = desktop
+            ? 152.0
+            : (constraints.maxWidth * .36).clamp(72.0, 112.0);
+        return Row(
+          key: ValueKey('guest-dish-${recipe['id']}'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DishPhoto(
+              api: widget.api,
+              path: image,
+              width: imageSize,
+              height: imageSize,
+              radius: 12,
+              crop: cropFromMedia(cover),
+            ),
+            SizedBox(width: desktop ? 24 : 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    recipe['title'],
+                    style: TextStyle(
+                      fontSize: desktop ? 20 : 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    lastCookedOn.isEmpty ? '暂无做菜记录' : '最后做菜：$lastCookedOn',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: quantity(recipe['id']),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

@@ -143,20 +143,37 @@ func (a *App) guestMenu(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, e := a.db.Query("SELECT id,title,category,description,image,cover_media_id,tags_json FROM recipes ORDER BY custom DESC,rowid")
+	// Return only the latest cooking date, rather than exposing diary contents.
+	// Older entries without dishes use the same title fallback as entryDishes.
+	rows, e := a.db.Query(`
+		WITH cooked AS (
+			SELECT json_extract(d.value, '$.id') AS recipe_id, e.cooked_on
+			FROM diary_entries e, json_each(e.dishes_json) d
+			WHERE e.deleted_at IS NULL
+			UNION ALL
+			SELECT p.id, e.cooked_on
+			FROM diary_entries e JOIN recipes p ON p.title=e.title COLLATE NOCASE
+			WHERE e.deleted_at IS NULL AND json_array_length(e.dishes_json)=0
+		), latest AS (
+			SELECT recipe_id, MAX(cooked_on) AS cooked_on FROM cooked GROUP BY recipe_id
+		)
+		SELECT p.id,p.title,p.category,p.description,p.image,p.cover_media_id,p.tags_json,
+			COALESCE(latest.cooked_on, '')
+		FROM recipes p LEFT JOIN latest ON latest.recipe_id=p.id
+		ORDER BY p.custom DESC,p.rowid`)
 	if e != nil {
 		errJSON(w, 500, "DB", "读取菜单失败")
 		return
 	}
 	menu := []map[string]any{}
 	for rows.Next() {
-		var rid, title, category, description, image, cover, tagsRaw string
-		if e = rows.Scan(&rid, &title, &category, &description, &image, &cover, &tagsRaw); e != nil {
+		var rid, title, category, description, image, cover, tagsRaw, lastCookedOn string
+		if e = rows.Scan(&rid, &title, &category, &description, &image, &cover, &tagsRaw, &lastCookedOn); e != nil {
 			break
 		}
 		tags := []string{}
 		json.Unmarshal([]byte(tagsRaw), &tags)
-		menu = append(menu, map[string]any{"id": rid, "title": title, "category": category, "description": description, "image": image, "tags": tags, "cover_media_id": cover})
+		menu = append(menu, map[string]any{"id": rid, "title": title, "category": category, "description": description, "image": image, "tags": tags, "cover_media_id": cover, "last_cooked_on": lastCookedOn})
 	}
 	if e == nil {
 		e = rows.Err()

@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fooddiary/data/api.dart';
 import 'package:fooddiary/ui/guest_ordering.dart';
+import 'package:fooddiary/ui/dish_photo.dart';
+import 'package:fooddiary/ui/theme.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +38,69 @@ void main() {
     );
     expect(guestOrderToken(Uri.parse('https://food.example/')), isNull);
   });
+
+  for (final width in [320.0, 390.0, 1440.0]) {
+    testWidgets('menu has square left photos and diary dates at width $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = await seed();
+      final recipes = await api.request('GET', '/recipes') as List;
+      final recipe = recipes.first;
+      for (final date in ['2026-10-20', '2026-10-01', '2026-10-10']) {
+        await api.request('POST', '/entries', {
+          'title': '一起吃晚饭',
+          'cooked_on': date,
+          'dishes': [
+            {'id': recipe['id'], 'title': recipe['title']},
+          ],
+        });
+      }
+      final link = await api.request('POST', '/order-links', {});
+      await api.logout();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: kitchenTheme(),
+          home: GuestMenuPage(api: api, token: link['id']),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('最后做菜：2026-10-20'), findsOneWidget);
+      expect(find.text('暂无做菜记录'), findsOneWidget);
+      final row = find.byKey(ValueKey('guest-dish-${recipe['id']}'));
+      final photo = find.descendant(of: row, matching: find.byType(DishPhoto));
+      final title = find.descendant(
+        of: row,
+        matching: find.text(recipe['title']),
+      );
+      final size = tester.getSize(photo);
+      expect(size.width, size.height);
+      expect(
+        tester.getTopLeft(title).dx,
+        greaterThan(tester.getTopRight(photo).dx),
+      );
+      expect(tester.getTopLeft(title).dy, tester.getTopLeft(photo).dy);
+      if (width >= 760) {
+        expect(tester.getTopLeft(photo).dx, greaterThan(160));
+        expect(size.width, 152);
+      }
+      // Both quantity buttons must fit alongside the photo on narrow phones.
+      await tester.tap(
+        find.descendant(of: row, matching: find.byTooltip('添加一份')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('购物车 (1)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(
+        find.descendant(of: row, matching: find.byTooltip('减少一份')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('购物车 (0)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   test(
     'guest orders persist across logout and retain original titles',

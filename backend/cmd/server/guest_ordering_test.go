@@ -82,3 +82,66 @@ func TestGuestOrderingCustomExpirationAndPhotos(t *testing.T) {
 		t.Fatalf("photo url: %s", url)
 	}
 }
+
+func TestGuestMenuLastCookedOn(t *testing.T) {
+	ts, db := newTestServer(t)
+	owner, guest := newClient(), newClient()
+	statusOf(t, postJSON(t, owner, ts.URL+"/api/v1/auth/setup", map[string]string{"password": "hunter2"}))
+	recipe := dataOf(t, postJSON(t, owner, ts.URL+"/api/v1/recipes", map[string]any{"title": "番茄炒蛋"}))
+	other := dataOf(t, postJSON(t, owner, ts.URL+"/api/v1/recipes", map[string]any{"title": "清炒时蔬"}))
+	link := dataOf(t, postJSON(t, owner, ts.URL+"/api/v1/order-links", map[string]any{}))
+	path := ts.URL + "/api/v1/guest/order/" + link["id"].(string)
+	assertDates := func(want string) {
+		t.Helper()
+		menu := dataOf(t, get(t, guest, path))
+		for _, value := range menu["recipes"].([]any) {
+			dish := value.(map[string]any)
+			expected := ""
+			if dish["id"] == recipe["id"] {
+				expected = want
+			}
+			if dish["last_cooked_on"] != expected {
+				t.Fatalf("last cooked date: %+v, want %q", dish, expected)
+			}
+		}
+	}
+	assertDates("")
+	// Cooking dates belong to the dish association, even after a rename.
+	for i, date := range []string{"2026-10-01", "2026-10-20", "2026-10-10"} {
+		raw, _ := json.Marshal([]map[string]any{{"id": recipe["id"], "title": "旧菜名"}})
+		if _, err := db.Exec(`INSERT INTO diary_entries(id,cooked_on,title,created_at,updated_at,dishes_json)
+			VALUES(?,?,'聚餐','now','now',?)`, date, date, string(raw)); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	assertDates("2026-10-20")
+	if _, err := db.Exec("UPDATE diary_entries SET deleted_at='now' WHERE cooked_on='2026-10-20'"); err != nil {
+		t.Fatal(err)
+	}
+	assertDates("2026-10-10")
+	// A title match must not override an explicit association to another dish.
+	raw, _ := json.Marshal([]map[string]any{{"id": other["id"], "title": other["title"]}})
+	if _, err := db.Exec(`INSERT INTO diary_entries(id,cooked_on,title,created_at,updated_at,dishes_json)
+		VALUES('other','2026-10-25',?,'now','now',?)`, recipe["title"], string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	menu := dataOf(t, get(t, guest, path))
+	for _, value := range menu["recipes"].([]any) {
+		dish := value.(map[string]any)
+		if dish["id"] == recipe["id"] && dish["last_cooked_on"] != "2026-10-10" {
+			t.Fatalf("matched unrelated diary title: %+v", dish)
+		}
+	}
+	// Legacy diaries with no dish list still resolve by recipe title.
+	if _, err := db.Exec(`INSERT INTO diary_entries(id,cooked_on,title,created_at,updated_at)
+		VALUES('legacy','2026-10-30',?,'now','now')`, recipe["title"]); err != nil {
+		t.Fatal(err)
+	}
+	menu = dataOf(t, get(t, guest, path))
+	for _, value := range menu["recipes"].([]any) {
+		dish := value.(map[string]any)
+		if dish["id"] == recipe["id"] && dish["last_cooked_on"] != "2026-10-30" {
+			t.Fatalf("legacy date: %+v", dish)
+		}
+	}
+}
